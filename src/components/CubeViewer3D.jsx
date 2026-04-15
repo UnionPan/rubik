@@ -398,6 +398,7 @@ export default function CubeViewer3D({ state, size = 3, highlightFace = null, an
 
   // ── Expose animateSlice to parent ────────────────────────────────────
   useEffect(() => {
+    // eslint-disable-next-line react-hooks/immutability
     if (animateMoveRef) animateMoveRef.current = animateSlice;
   }, [animateMoveRef, animateSlice]);
 

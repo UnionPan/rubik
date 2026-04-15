@@ -1,7 +1,7 @@
 import { useMemo, useState, useCallback } from 'react';
 import {
   truePermutation, permToCycles, solvedState,
-  getMovePositionCycles, formatCycles, analyzeSequence,
+  getMovePositionCycles, formatCycles,
   parseMove, FACE_NAMES, COLORS,
 } from '../lib/cubeState';
 
@@ -412,7 +412,6 @@ function CycleChordDiagram({ cycles, N }) {
       {/* Dots */}
       {Array.from({ length: total }, (_, i) => {
         const { x, y } = pos(i, total);
-        const face = Math.floor(i / 9);
         const inCycle = cycles.some(c => {
           // Map cycle indices back approximately
           return c.some(ci => Math.round(ci * total / (N * N * 6)) === i);
@@ -482,11 +481,6 @@ function PieceOrbitDiagram({ state, N }) {
     const colorIdx = state[f][r][c];
     return FACE_COLORS_HEX[colorIdx] || '#888';
   };
-  const solvedColor = (src) => {
-    const [f, r, c] = src;
-    return FACE_COLORS_HEX[solved[f][r][c]];
-  };
-
   // Check if a piece is in its solved position
   const isCornerSolved = (stickers) =>
     stickers.every(s => state[s[0]][s[1]][s[2]] === solved[s[0]][s[1]][s[2]]);

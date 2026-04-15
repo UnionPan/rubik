@@ -191,7 +191,7 @@ function findMatchingOLL(state) {
       try {
         const result = applyMoveSequence(s, alg.notation);
         if (isOLLDone(result)) return alg;
-      } catch (_) { /* skip bad notation */ }
+      } catch { /* skip bad notation */ }
     }
   }
   return null;
@@ -214,7 +214,7 @@ function findMatchingPLL(state) {
         for (let post = 0; post < 4; post++) {
           if (isSolved(applyAUF(result, post))) return alg;
         }
-      } catch (_) { /* skip bad notation */ }
+      } catch { /* skip bad notation */ }
     }
   }
   return null;

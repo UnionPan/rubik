@@ -173,17 +173,15 @@ export function parseMoveSequence(sequence) {
   const moves = [];
   let m;
   while ((m = re.exec(sequence)) !== null) {
-    const [, layerPfx, faceChar, wide, numSuffix, prime] = m;
+    const [, layerPfx, faceChar, , numSuffix, prime] = m;
     const face = faceChar.toUpperCase();
     const layer = layerPfx ? parseInt(layerPfx) - 1 : 0;
-    const reps = (numSuffix ? parseInt(numSuffix) : prime.length === 0 ? 1 : 0);
-    const count = reps || 1;
     const cw = prime === "'" ? false : true;
 
     // For "2" suffix, apply move twice
     const times = numSuffix === '2' ? 2 : (prime === "''" ? 2 : 1);
     for (let t = 0; t < times; t++) {
-      moves.push({ face, layer: wide ? layer : layer, cw, notation: m[0] });
+      moves.push({ face, layer, cw, notation: m[0] });
     }
     if (times === 1 && numSuffix !== '2') {
       // already pushed once, remove the extra
@@ -199,7 +197,7 @@ export function parseMoveSequence(sequence) {
 export function parseMove(notation) {
   const m = notation.trim().match(/^(\d*)([URFDLB])(w?)(\d*)('{0,3})$/i);
   if (!m) return null;
-  const [, layerPfx, faceChar, wide, numSuffix, prime] = m;
+  const [, layerPfx, faceChar, , numSuffix, prime] = m;
   const face = faceChar.toUpperCase();
   const layer = layerPfx ? parseInt(layerPfx) - 1 : 0;
   const double = numSuffix === '2';
@@ -232,8 +230,6 @@ export function isSolved(state) {
  */
 export function getPermutation(state) {
   const N = state[0].length;
-  const solved = solvedState(N);
-  const nn = N * N;
   const P = [];
   for (let f = 0; f < 6; f++) {
     for (let r = 0; r < N; r++) {
@@ -280,7 +276,6 @@ export function computeCycles(state) {
     if (color === f) { visited[start] = 1; continue; } // fixed point, skip
 
     // Follow cycle
-    const cycle = [start];
     visited[start] = 1;
     // This is a simplified cycle display: we just show which positions swap colors
     // Full permutation tracking would require sticker identity tracking, not just color

@@ -1,6 +1,6 @@
 import { useState, useEffect, useCallback, useRef } from 'react';
 import { ALGORITHMS, ALGORITHM_CATEGORIES, getAlgorithmsForSize, tokenize } from '../lib/algorithms';
-import { applyNotation, solvedState, parseMove } from '../lib/cubeState';
+import { applyNotation, parseMove } from '../lib/cubeState';
 
 /**
  * AlgorithmPanel

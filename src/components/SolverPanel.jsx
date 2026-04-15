@@ -49,7 +49,7 @@ export default function SolverPanel({
   const [solution, setSolution]       = useState(null);
   const [solveMoves, setSolveMoves]   = useState(null);
   const [solveError, setSolveError]   = useState(null);
-  const [activeStep, setActiveStep]   = useState(-1); // which move is currently animating
+  const [activeStep, setActiveStep]   = useState(-1); // eslint-disable-line no-unused-vars
   const workerRef = useRef(null);
   const reqIdRef  = useRef(0);
 
@@ -87,10 +87,13 @@ export default function SolverPanel({
       .filter(Boolean).join(' ').trim(),
     [scrambleMsg, moveHistory]);
 
+  // Reset solution when cube state changes
+  /* eslint-disable react-hooks/set-state-in-effect */
   useEffect(() => {
     setSolution(null); setSolveMoves(null);
     setSolveError(null); setActiveStep(-1);
   }, [state]);
+  /* eslint-enable react-hooks/set-state-in-effect */
 
   const handleSolve = useCallback(() => {
     if (!workerRef.current || !workerReady || solving || animating) return;
@@ -104,22 +107,6 @@ export default function SolverPanel({
   // Animated play with per-move step highlighting
   const handlePlay = useCallback(() => {
     if (!solveMoves || solveMoves.length === 0 || animating) return;
-    let cur = stateRef.current;
-    let i = 0;
-    const { applyMove } = parseMoveSequence.__proto__ || {};
-    // Use playMoveSequence as-is; step highlighting via a local runner
-    // Build a wrapper that sets activeStep per move:
-    const runStep = (startState) => {
-      if (i >= solveMoves.length) { setActiveStep(-1); return; }
-      setActiveStep(i);
-      const mv = solveMoves[i++];
-      const afterMove = () => { runStep(startState); };
-      // We call the animateMoveRef via playMoveSequence of a single move
-      playMoveSequence([mv], stateRef.current);
-      // After animation ends App sets animating=false; next step via effect:
-    };
-    // Simpler: just call playMoveSequence on the full set and highlight nothing
-    // (Step-level highlight requires exposing the per-move callback)
     playMoveSequence(solveMoves, stateRef.current);
   }, [solveMoves, animating, playMoveSequence, stateRef]);
 
