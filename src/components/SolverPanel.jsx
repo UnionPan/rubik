@@ -1,77 +1,58 @@
 import { useState, useEffect, useRef, useCallback, useMemo } from 'react';
 import { parseMoveSequence, isSolved } from '../lib/cubeState';
+import { buildSolveInput } from '../lib/solveInput';
 
 // ── Phase 2 move set: only these are allowed in H = <U, D, R2, L2, F2, B2> ──
 const PHASE2_SET = new Set(['U', "U'", 'U2', 'D', "D'", 'D2', 'R2', 'L2', 'F2', 'B2']);
-
-/**
- * Detect where Phase 1 ends and Phase 2 begins.
- * Phase 2 is the longest trailing suffix of the solution where every move
- * is a Phase-2 move. Phase 1 is everything before that suffix.
- *
- * This heuristic is exact in all practical Kociemba outputs because the
- * two-phase algorithm is designed so that Phase 2 never needs Phase-1-only moves.
- */
-function splitPhases(tokens) {
-  let p2Start = tokens.length;
-  for (let i = tokens.length - 1; i >= 0; i--) {
-    if (PHASE2_SET.has(tokens[i])) p2Start = i;
-    else break;
-  }
-  return { p1: tokens.slice(0, p2Start), p2: tokens.slice(p2Start) };
-}
 
 /** True for a move that can only occur in Phase 1 (quarter turns of R/L/F/B) */
 function isPhase1Only(tok) { return !PHASE2_SET.has(tok); }
 
 /**
- * SolverPanel
+ * SolverPanel - two-phase (Kociemba) solver for every cube size.
+ *   2×2        corners on a virtual 3×3
+ *   3×3        solved directly from the current colors
+ *   4×4, 5×5   once reduced: parity fix (if needed), then the reduced 3×3
  * Props:
- *   state          — current 6×N×N cube state
- *   cubeSize       — N (solver only supports 3)
- *   scrambleMsg    — initial scramble string
- *   moveHistory    — [{notation}, ...] subsequent manual moves
+ *   state, cubeSize
  *   animating      — true while a sequence plays
- *   playMoveSequence(moves, startState) — animates a move array
+ *   playMoveSequence(turns, startState) — animates quarter turns
  *   stateRef       — always-current state ref
+ *   detectedPattern — pattern detector result (reduction progress on big cubes)
  */
 export default function SolverPanel({
   state,
   cubeSize,
-  scrambleMsg,
-  moveHistory,
   animating,
   playMoveSequence,
   stateRef,
+  detectedPattern = null,
 }) {
   const [workerReady, setWorkerReady] = useState(false);
   const [solving, setSolving]         = useState(false);
-  const [solution, setSolution]       = useState(null);
-  const [solveMoves, setSolveMoves]   = useState(null);
+  const [solution, setSolution]       = useState(null); // { prefix, moves, phase1Length }
   const [solveError, setSolveError]   = useState(null);
-  const [activeStep, setActiveStep]   = useState(-1); // eslint-disable-line no-unused-vars
   const workerRef = useRef(null);
   const reqIdRef  = useRef(0);
+  const pendingPrefixRef = useRef([]);
 
-  // ── Worker lifecycle ──────────────────────────────────────────────────
+  // ── Worker lifecycle (one solver for every size) ──────────────────────
   useEffect(() => {
-    if (cubeSize !== 3 && cubeSize !== 2) return;
     const worker = new Worker(
       new URL('../lib/solver.worker.js', import.meta.url),
       { type: 'module' }
     );
     worker.onmessage = (e) => {
-      const { type, id, solution: sol, error: err } = e.data;
+      const { type, id, moves, phase1Length, error: err } = e.data;
       if (type === 'ready') { setWorkerReady(true); return; }
       if (id !== reqIdRef.current) return;
       setSolving(false);
       if (err) {
         setSolveError(`Solver error: ${err}`);
-        setSolution(null); setSolveMoves(null);
+        setSolution(null);
       } else {
-        setSolution(sol); setSolveError(null);
-        try { setSolveMoves(sol ? parseMoveSequence(sol) : []); }
-        catch { setSolveMoves(null); }
+        setSolution({ prefix: pendingPrefixRef.current, moves, phase1Length });
+        setSolveError(null);
       }
     };
     worker.onerror = (e) => {
@@ -80,100 +61,95 @@ export default function SolverPanel({
     };
     workerRef.current = worker;
     return () => { worker.terminate(); workerRef.current = null; setWorkerReady(false); };
-  }, [cubeSize]);
+  }, []);
 
-  const buildScramble = useCallback(() =>
-    [scrambleMsg, ...moveHistory.map(m => m.notation)]
-      .filter(Boolean).join(' ').trim(),
-    [scrambleMsg, moveHistory]);
+  const input = useMemo(() => buildSolveInput(state, cubeSize), [state, cubeSize]);
+  const cubeIsSolved = isSolved(state);
 
   // Reset solution when cube state changes
   /* eslint-disable react-hooks/set-state-in-effect */
   useEffect(() => {
-    setSolution(null); setSolveMoves(null);
-    setSolveError(null); setActiveStep(-1);
+    setSolution(null);
+    setSolveError(null);
   }, [state]);
   /* eslint-enable react-hooks/set-state-in-effect */
 
   const handleSolve = useCallback(() => {
-    if (!workerRef.current || !workerReady || solving || animating) return;
-    const scramble = buildScramble();
-    setSolution(null); setSolveMoves(null);
-    setSolveError(null); setSolving(true); setActiveStep(-1);
+    if (!workerRef.current || !workerReady || solving || animating || !input.ok) return;
+    setSolution(null);
+    setSolveError(null);
+    setSolving(true);
     reqIdRef.current += 1;
-    workerRef.current.postMessage({ scramble, id: reqIdRef.current });
-  }, [workerReady, solving, animating, buildScramble]);
+    pendingPrefixRef.current = input.prefix;
+    workerRef.current.postMessage({ facelets: input.facelets, id: reqIdRef.current });
+  }, [workerReady, solving, animating, input]);
 
-  // Animated play with per-move step highlighting
+  // Animate: parity fix (big cubes) followed by the two-phase solution
   const handlePlay = useCallback(() => {
-    if (!solveMoves || solveMoves.length === 0 || animating) return;
-    playMoveSequence(solveMoves, stateRef.current);
-  }, [solveMoves, animating, playMoveSequence, stateRef]);
+    if (!solution || animating) return;
+    const sequence = [...solution.prefix.map(p => p.notation), ...solution.moves].join(' ');
+    const turns = parseMoveSequence(sequence, cubeSize);
+    if (turns.length) playMoveSequence(turns, stateRef.current);
+  }, [solution, animating, cubeSize, playMoveSequence, stateRef]);
 
-  // ── Parse phases from solution ────────────────────────────────────────
-  const phases = useMemo(() => {
-    if (!solution) return null;
-    const tokens = solution.split(/\s+/).filter(Boolean);
-    if (tokens.length === 0) return { tokens: [], p1: [], p2: [] };
-    return { tokens, ...splitPhases(tokens) };
-  }, [solution]);
-
-  if (cubeSize === 4 || cubeSize === 5) {
-    return <ReductionMethodPanel cubeSize={cubeSize} />;
-  }
-
-  // 2×2 uses the same Kociemba worker as 3×3:
-  // All 2×2 moves are outer-face moves (R, U, F, D, L, B) — a subset of valid 3×3 moves.
-  // The virtual 3×3's edges/centers start solved; Kociemba only needs to fix the corners.
-
-  const cubeIsSolved = isSolved(state);
-  const scramble     = buildScramble();
+  const isBig = cubeSize > 3;
+  const reduction = isBig ? REDUCTION_SIZES[cubeSize] : null;
 
   return (
     <div className="solver-panel">
       <h3 className="panel-title">
-        <span className="icon">★</span> Kociemba Solver
-        {cubeSize === 2 && <span className="solver-size-note"> — 2×2 via corner-equivalence</span>}
+        <span className="icon">★</span> Two-phase Solver
+        {cubeSize === 2 && <span className="solver-size-note"> — 2×2 corners on a virtual 3×3</span>}
+        {isBig && <span className="solver-size-note"> — {cubeSize}×{cubeSize} by reduction</span>}
       </h3>
+
+      {/* ── Big cube: reduction progress until the solver can take over ── */}
+      {isBig && (
+        <ReductionStatus input={input} pattern={detectedPattern} cubeSize={cubeSize} solved={cubeIsSolved} />
+      )}
 
       {/* ── Worker status ── */}
       <div className={`solver-status-bar ${workerReady ? 'ready' : 'loading'}`}>
         {workerReady
           ? <><span className="ssb-dot green"/>Solver ready</>
-          : <><span className="ssb-dot spin"/>Initializing Kociemba tables…</>}
+          : <><span className="ssb-dot spin"/>Building the two-phase tables…</>}
       </div>
 
       {/* ── Solve button ── */}
       <button
         className={`solver-solve-btn ${solving ? 'solving' : ''}`}
         onClick={handleSolve}
-        disabled={!workerReady || solving || animating || cubeIsSolved || !scramble}
+        disabled={!workerReady || solving || animating || cubeIsSolved || !input.ok}
         title={
           !workerReady     ? 'Initializing…'
           : cubeIsSolved   ? 'Cube is already solved'
-          : !scramble      ? 'Apply moves or scramble first'
+          : !input.ok      ? input.reason
           : solving        ? 'Searching…'
-          : 'Run two-phase solver'
+          : 'Run the two-phase solver'
         }
       >
         {solving
           ? <><span className="btn-spin">⏳</span> Solving…</>
           : cubeIsSolved ? '✓ Already solved'
+          : isBig ? '★ Finish the reduced cube'
           : '★ Find solution'}
       </button>
 
-      {/* ── Error ── */}
+      {!input.ok && !cubeIsSolved && !isBig && <div className="solver-error">{input.reason}</div>}
       {solveError && <div className="solver-error">{solveError}</div>}
 
       {/* ── Solution result with phase visualisation ── */}
-      {solution !== null && !solveError && phases && (
+      {solution && !solveError && (
         <SolutionDisplay
-          phases={phases}
+          solution={solution}
           animating={animating}
           onPlay={handlePlay}
           cubeIsSolved={cubeIsSolved}
         />
       )}
+
+      {/* ── Big cube: the method ── */}
+      {reduction && <ReductionMethod info={reduction} cubeSize={cubeSize} />}
 
       {/* ── Algorithm diagram: the two-phase picture ── */}
       <TwoPhaseSearchDiagram />
@@ -187,11 +163,56 @@ export default function SolverPanel({
   );
 }
 
-// ── Solution display with Phase 1 / Phase 2 split ─────────────────────────────
+// ── Big cube: where the reduction stands ──────────────────────────────────────
 
-function SolutionDisplay({ phases, animating, onPlay, cubeIsSolved }) {
-  const { tokens, p1, p2 } = phases;
-  if (tokens.length === 0) {
+function ReductionStatus({ input, pattern, cubeSize, solved }) {
+  if (solved) return null;
+  if (input.ok) {
+    return (
+      <div className="rdx-status ready">
+        <div className="rdx-status-title">✓ Reduced to a 3×3</div>
+        <p className="rdx-status-body">
+          Centers are solved and all 12 edges are paired, so the solver can finish the cube with
+          outer turns{input.prefix.length > 0 && <> after fixing <strong>{input.prefix.map(p => p.label).join(' and ')}</strong></>}.
+        </p>
+      </div>
+    );
+  }
+  return (
+    <div className="rdx-status">
+      <div className="rdx-status-title">Reduce first: {pattern?.stageLabel ?? 'Centers'}</div>
+      {pattern?.steps?.length > 0 && (
+        <ol className="pd-steps" aria-label="Reduction stages">
+          {pattern.steps.map(st => (
+            <li key={st.id} className={`pd-step ${st.status}`}>{st.status === 'done' ? '✓ ' : ''}{st.label}</li>
+          ))}
+        </ol>
+      )}
+      <p className="rdx-status-body">{pattern?.message}</p>
+      {pattern?.progress && (
+        <div className="pd-progress">
+          <span className="pd-progress-bar">
+            <span className="pd-progress-fill" style={{ width: `${(pattern.progress.done / pattern.progress.total) * 100}%`, background: 'var(--orange)' }} />
+          </span>
+          <span className="pd-progress-text">{pattern.progress.done}/{pattern.progress.total} {pattern.progress.unit}</span>
+        </div>
+      )}
+      <p className="rdx-status-note">
+        Centers and edge pairing are done by hand (the Algorithms tab shows the pairing move).
+        Once the {cubeSize}×{cubeSize} is reduced, this tab finishes it: parity fix plus a two-phase solve.
+      </p>
+    </div>
+  );
+}
+
+// ── Solution display with parity fix and exact Phase 1 / Phase 2 split ──────
+
+function SolutionDisplay({ solution, animating, onPlay, cubeIsSolved }) {
+  const { prefix, moves, phase1Length } = solution;
+  const p1 = moves.slice(0, phase1Length);
+  const p2 = moves.slice(phase1Length);
+  const prefixCount = prefix.reduce((n, p) => n + p.notation.split(/\s+/).length, 0);
+  if (moves.length === 0 && prefix.length === 0) {
     return (
       <div className="solver-result">
         <div className="solver-result-solved">✓ No moves needed — cube is already solved.</div>
@@ -202,8 +223,25 @@ function SolutionDisplay({ phases, animating, onPlay, cubeIsSolved }) {
     <div className="solver-result">
       <div className="solver-result-header">
         <span className="srh-label">Solution</span>
-        <span className="srh-count">{tokens.length} moves total</span>
+        <span className="srh-count">
+          {moves.length} moves{prefixCount > 0 && ` + ${prefixCount} for parity`}
+        </span>
       </div>
+
+      {/* Parity fix (big cubes) */}
+      {prefix.map(p => (
+        <div key={p.label} className="phase-block parity">
+          <div className="phase-block-label">
+            <span className="phase-badge parity">{p.label}</span>
+            <span className="phase-desc">{p.name}</span>
+          </div>
+          <div className="phase-moves">
+            {p.notation.split(/\s+/).map((tok, i) => (
+              <span key={i} className="solver-move-token parity">{tok}</span>
+            ))}
+          </div>
+        </div>
+      ))}
 
       {/* Phase 1 block */}
       {p1.length > 0 && (
@@ -529,89 +567,81 @@ const REDUCTION_SIZES = {
   4: {
     label: '4×4 (Revenge)',
     groupSize: '≈ 7.4 × 10⁴⁵',
-    godsNumber: '≈ 35 moves',
-    pieceCounts: '8 corners · 24 wing edges · 24 center stickers',
+    pieceCounts: '8 corners · 24 wings · 24 centers',
     phases: [
       {
         num: 1,
-        title: 'Solve centres',
+        title: 'Solve the centers',
         col: '#FF5800',
-        desc: 'Orient all 6 face centres. Each face has 4 centre pieces that must match the face colour. Use only inner-slice moves (2R, 2U…) to avoid disturbing pieces solved later. The symmetry group of the 24 centres is (Z₄)⁶, order ≈ 4.1 × 10⁴.',
-        moves: '2R 2U 2R\' 2U\'',
-        movesLabel: 'typical centre commutator',
+        desc: 'Build a solid 2×2 center on every face. The 24 centers form one orbit (see the Graph Theory tab); same-colored centers are interchangeable, so (4!)⁶ different arrangements all look solved. Inner slice turns move centers, outer turns only spin them.',
+        moves: "2R U 2R'",
+        movesLabel: 'move a center piece between faces',
       },
       {
         num: 2,
-        title: 'Pair wing edges',
+        title: 'Pair the edges',
         col: '#fbbf24',
-        desc: 'The 4×4 has two "wing" stickers per edge slot (12 slots × 2 = 24 wings). Pair matching wings using inner-slice triggers: move a wing from one slice, insert its partner, restore. After pairing, the 4×4 behaves like a 3×3 cube.',
-        moves: 'Rw U R\' U\' Rw\'',
-        movesLabel: 'edge-pairing trigger',
+        desc: 'Each edge slot holds two wings, one from each mirror-image wing orbit. Line up two matching wings with an inner slice, swap the new pair out with R U R\', then undo the slice so the centers stay solved.',
+        moves: "Uw R U R' Uw'",
+        movesLabel: 'slice–flip–slice',
       },
       {
         num: 3,
-        title: 'Solve as 3×3',
+        title: 'Solve as a 3×3',
         col: '#60a5fa',
-        desc: 'Apply Kociemba (or any 3×3 solver) using only outer-face moves. Watch for OLL parity (one edge flipped) or PLL parity (two edges swapped) — artefacts of the reduction that require special 4×4-specific fixes before the final solve.',
-        moves: '— Kociemba on virtual 3×3 —',
+        desc: 'Now outer turns act on the 4×4 exactly like 3×3 turns. Two positions cannot occur on a real 3×3: OLL parity (the edge flips sum to an odd number) and PLL parity (edge and corner permutations of different parity). Fix them with the parity algorithms, then solve the 3×3.',
+        moves: 'parity fix + two-phase solve (this tab)',
         movesLabel: '3×3 phase',
       },
     ],
-    parityNote: 'OLL parity: one edge visually flipped (impossible on 3×3). Fix: (r U2 x r U2 r\' U2 3r U2 Lw U2 r\' U2 r U2 r\' U2 Rw\'). PLL parity: two wings swapped (impossible on 3×3). Fix: r2 U2 r2 Uw2 r2 u2.',
+    parityNote: "OLL parity: 2R2 B2 U2 2L U2 2R' U2 2R U2 F2 2R F2 2L' B2 2R2 (flips the UF edge; 9 inner-slice quarter turns make the wing permutation odd). PLL parity: 2R2 U2 2R2 Uw2 2R2 Uw2 (swaps two edges, followed by U2).",
   },
   5: {
     label: '5×5 (Professor)',
     groupSize: '≈ 2.8 × 10⁷⁴',
-    godsNumber: '≈ 46 moves',
-    pieceCounts: '8 corners · 24 wing edges · 9-sticker centres per face (1 fixed + 8 movable)',
+    pieceCounts: '8 corners · 12 midges · 24 wings · 24 X-centers · 24 +-centers · 6 fixed centers',
     phases: [
       {
         num: 1,
-        title: 'Solve + and cross centres',
+        title: 'Solve the centers',
         col: '#FF5800',
-        desc: 'Each face has a 3×3 centre grid (9 stickers). First fix the 6 "+" centres (the centre sticker of each centre group, which is fixed-position), then solve the 8 surrounding centre stickers per face using 3-cycle commutators.',
-        moves: '3R 2U 3R\' 2U\'',
-        movesLabel: '5×5 centre commutator',
+        desc: 'Each face has 9 center stickers: the fixed middle one, 4 +-centers and 4 X-centers. The +- and X-centers are two separate orbits of 24, so each kind only ever trades places with its own kind. Build a solid 3×3 center on every face.',
+        moves: "2R U 2R'",
+        movesLabel: 'move an X-center between faces',
       },
       {
         num: 2,
-        title: 'Pair wing edges (×3)',
+        title: 'Pair the edges',
         col: '#fbbf24',
-        desc: 'The 5×5 has two separate wing layers per edge slot (inner and outer wings) plus the middle edge. Pair inner wings first, then outer wings, using slice-trigger sequences. After pairing, 36 wings + 12 midges reduce to 12 virtual "triple edges".',
-        moves: '3Rw U R\' U\' 3Rw\'',
-        movesLabel: 'wing pairing trigger',
+        desc: 'Each edge slot holds a midge and two wings (one from each mirror-image wing orbit). Pair the two wings with their midge into a "tredge", using slice–flip–slice. The last edge can end up with its wings swapped: flip them with the edge-flip algorithm.',
+        moves: "Uw R U R' Uw'",
+        movesLabel: 'slice–flip–slice',
       },
       {
         num: 3,
-        title: 'Solve as 3×3',
+        title: 'Solve as a 3×3',
         col: '#60a5fa',
-        desc: 'Apply Kociemba on the virtual 3×3 using only outer-face moves. OLL and PLL parity can occur, requiring the same 4×4-style parity fixes.',
-        moves: '— Kociemba on virtual 3×3 —',
+        desc: 'Once reduced, the corners, midges and fixed centers are exactly a 3×3, so there is no OLL or PLL parity: this tab solves it directly with outer turns.',
+        moves: 'two-phase solve (this tab)',
         movesLabel: '3×3 phase',
       },
     ],
-    parityNote: 'Same OLL and PLL parity as 4×4. Parity arises from the even-layer structure allowing odd permutations of wing edges that are impossible on odd-layer cubes.',
+    parityNote: 'No parity after reduction: the midges fix the edge parity just like 3×3 edges. The only parity-like case is while pairing the last edge, when its two wings are swapped.',
   },
 };
 
-function ReductionMethodPanel({ cubeSize }) {
-  const info = REDUCTION_SIZES[cubeSize];
-  if (!info) return null;
-
+function ReductionMethod({ info, cubeSize }) {
   return (
-    <div className="solver-panel">
-      <h3 className="panel-title"><span className="icon">★</span> Reduction Solver — {info.label}</h3>
-
+    <div className="rdx-method">
       <div className="solver-intro-card">
-        <div className="sic-title">The Reduction Method</div>
+        <div className="sic-title">The reduction method — {info.label}</div>
         <p className="sic-body">
-          Kociemba's two-phase algorithm is designed for the 3×3. For {cubeSize}×{cubeSize},
-          the standard approach is <strong>reduction</strong>: solve the extra pieces
-          (centres and wing edges) until the puzzle behaves like a 3×3, then apply Kociemba.
+          Kociemba's algorithm works on the 3×3 group. A {cubeSize}×{cubeSize} is first
+          <strong> reduced</strong>: solve the centers and pair the edges until it behaves like a
+          3×3, then solve that 3×3.
         </p>
         <p className="sic-body">
           Group size: <span style={{color:'var(--orange)',fontFamily:'var(--mono)'}}>{info.groupSize}</span>
-          {' · '}God's Number: <span style={{color:'var(--orange)',fontFamily:'var(--mono)'}}>{info.godsNumber}</span>
           {' · '}{info.pieceCounts}
         </p>
       </div>
@@ -635,28 +665,8 @@ function ReductionMethodPanel({ cubeSize }) {
 
       {/* Parity note */}
       <div className="rdx-parity">
-        <div className="rdx-parity-label">⚠ Parity issues</div>
+        <div className="rdx-parity-label">⚠ Parity</div>
         <p className="rdx-parity-body">{info.parityNote}</p>
-      </div>
-
-      {/* Why Kociemba can't run directly */}
-      <div className="solver-diagram-card">
-        <div className="sdc-title">Why Kociemba doesn't directly apply to {cubeSize}×{cubeSize}</div>
-        <p className="sic-body">
-          Kociemba's Phase 1 coordinates (flip, twist, slice) are defined over the <em>corner</em> and
-          <em>edge</em> piece types of a 3×3. A {cubeSize}×{cubeSize} has additional piece types (centre stickers,
-          wing edges) with their own permutation groups. Extending the IDA* tables to cover all
-          {' '}{6 * cubeSize * cubeSize} stickers would increase the coordinate space
-          from ~10⁹ (3×3) to ~10{cubeSize === 4 ? '²⁰' : '³⁰'} — computationally intractable
-          without specialised hardware or months of precomputation.
-        </p>
-        <p className="sic-body">
-          The reduction method sidesteps this by first reducing the {cubeSize}×{cubeSize} to a
-          virtual 3×3, then running Kociemba on the much smaller group. The trade-off: the
-          full solution is not globally optimal (each phase is locally greedy), so solutions
-          typically use more moves than necessary. This is why competitive speedcubing programs
-          use domain-specific solvers per size.
-        </p>
       </div>
     </div>
   );

@@ -1,0 +1,8 @@
+# Netlify build: lint and test before building, so a failing check blocks the deploy.
+[build]
+  command = "npm run lint && npm test && npm run build"
+  publish = "dist"
+
+[build.environment]
+  # Vite 8 needs Node 20.19+ / 22.12+
+  NODE_VERSION = "22"

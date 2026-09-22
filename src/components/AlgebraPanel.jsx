@@ -1,8 +1,8 @@
 import { useMemo, useState, useCallback } from 'react';
 import {
-  truePermutation, permToCycles, solvedState,
-  getMovePositionCycles, formatCycles,
-  parseMove, FACE_NAMES, COLORS,
+  permToCycles, solvedState, analyzeSequence, isSolved,
+  getTurnPositionCycles, formatCycles,
+  FACE_NAMES, COLORS,
 } from '../lib/cubeState';
 
 // ── Size-specific Group Theory text ──────────────────────────────────────────
@@ -41,10 +41,12 @@ const PIECE_COUNTS = {
  * Props:
  *   state: 6×N×N cube state
  *   size: N
- *   moveHistory: [{notation, face, layer, cw}, ...]  — sequential moves applied so far
+ *   moveHistory: quarter turns [{notation, face, layers, cw}, ...] since reset/scramble
+ *   solvePath: every quarter turn since the last solved state (scramble + moves),
+ *              which pins down the exact sticker permutation
  *   algorithmNote: { groupTheoryNote, algebraNote, order, refs } | null
  */
-export default function AlgebraPanel({ state, size = 3, moveHistory = [], algorithmNote = null }) {
+export default function AlgebraPanel({ state, size = 3, moveHistory = [], solvePath = [], algorithmNote = null }) {
   const N = size;
 
   // Track which trace rows have their cycle string expanded
@@ -53,9 +55,11 @@ export default function AlgebraPanel({ state, size = 3, moveHistory = [], algori
     setExpandedRows(prev => ({ ...prev, [i]: !prev[i] }));
   }, []);
 
-  // ── Current permutation (color-matching heuristic) ────────────────────
-  const perm   = useMemo(() => truePermutation(state), [state]);
+  // ── Current permutation, exact: compose every turn since solved ───────
+  // (Colors alone cannot tell identical stickers apart on big cubes.)
+  const perm   = useMemo(() => analyzeSequence(solvePath, N).perm, [solvePath, N]);
   const cycles = useMemo(() => permToCycles(perm, true), [perm]);
+  const looksSolved = isSolved(state);
 
   const movedCount = cycles.reduce((a, c) => a + c.length, 0);
   const cycleTypes = {};
@@ -75,21 +79,17 @@ export default function AlgebraPanel({ state, size = 3, moveHistory = [], algori
     let perm = Array.from({ length: total }, (_, i) => i);
     const result = [];
 
-    for (const { notation } of moveHistory) {
-      const mv = parseMove(notation);
-      if (!mv) continue;
-      const moveCycles = getMovePositionCycles(mv.face, mv.layer, mv.cw, N);
-      const times = mv.double ? 2 : 1;
-      for (let t = 0; t < times; t++) {
-        const newPerm = [...perm];
-        moveCycles.forEach(([a, b, c, d]) => {
-          newPerm[b] = perm[a];
-          newPerm[c] = perm[b];
-          newPerm[d] = perm[c];
-          newPerm[a] = perm[d];
-        });
-        perm = newPerm;
-      }
+    for (const turn of moveHistory) {
+      const { notation } = turn;
+      const moveCycles = getTurnPositionCycles(turn, N);
+      const newPerm = [...perm];
+      moveCycles.forEach(([a, b, c, d]) => {
+        newPerm[b] = perm[a];
+        newPerm[c] = perm[b];
+        newPerm[d] = perm[c];
+        newPerm[a] = perm[d];
+      });
+      perm = newPerm;
       // Decompose current cumulative perm into cycles
       const visited = new Uint8Array(total);
       const cumCycles = [];
@@ -165,7 +165,7 @@ export default function AlgebraPanel({ state, size = 3, moveHistory = [], algori
           <GlossaryCard
             term="Parity"
             color="#6ee7b7"
-            plain={`Any shuffle can be broken into two-sticker swaps. If you need an even number of swaps, the permutation is even (parity = even); odd number of swaps → odd parity. On a real cube, legal positions always have even parity — which is why you can't move just one edge without messing up another.`}
+            plain={`Any shuffle can be broken into two-sticker swaps. If you need an even number of swaps, the permutation is even (parity = even); odd number of swaps → odd parity. On a 3×3 every quarter turn is odd on the 54 stickers, so sticker parity just counts quarter turns. The real constraint is on pieces: the corner and edge permutations always have the same parity, which is why you can't swap just two edges.`}
           />
         </div>
       </div>
@@ -175,13 +175,13 @@ export default function AlgebraPanel({ state, size = 3, moveHistory = [], algori
         <div className="section-label">Current position — live stats</div>
         <div className="algebra-stat-row">
           <StatChip
-            label="Stickers out of place"
-            tooltip="How many of the 54 stickers are not on their solved-state position"
+            label="Stickers moved"
+            tooltip={`How many of the ${6 * N * N} stickers are not in their starting position (tracked exactly through every turn)`}
             value={movedCount}
           />
           <StatChip
             label="Parity"
-            tooltip="Even = solvable with an even number of 2-swaps. All legal cube states are even."
+            tooltip="Parity of the sticker permutation. A quarter turn's parity is (−1)^(number of its 4-cycles)."
             value={parity}
             color={parity === 'Even' ? '#6ee7b7' : '#f87171'}
           />
@@ -200,13 +200,20 @@ export default function AlgebraPanel({ state, size = 3, moveHistory = [], algori
         {cycles.length === 0 && (
           <div className="solved-note">✓ Identity element — every sticker is home. Cube is solved.</div>
         )}
+        {cycles.length > 0 && looksSolved && (
+          <div className="solved-note">
+            ✓ Looks solved, yet {movedCount} stickers sit in other positions of the same color.
+            This is not the identity: it is an element of the stabilizer of the solved coloring,
+            such as a whole-cube rotation or identical-looking stickers trading places.
+          </div>
+        )}
       </div>
 
       {/* ── Janet Chen permutation trace ── */}
       {trace.length > 0 && (
         <div className="algebra-section">
           <div className="section-label" style={{display:'flex',alignItems:'center',justifyContent:'space-between'}}>
-            <span>Move-by-move permutation trace</span>
+            <span style={{ flex: 1 }}>Move-by-move permutation trace</span>
             <PermTraceToggle />
           </div>
           <div className="diagram-note" style={{marginBottom: '8px'}}>
@@ -214,7 +221,7 @@ export default function AlgebraPanel({ state, size = 3, moveHistory = [], algori
             the 54 stickers. Compose them left-to-right and watch the group element evolve.
             Labels like <span className="math-mono">U12</span> = face U, row 1, col 2.
             A 4-cycle <span className="math-mono">(a b c d)</span> means a→b→c→d→a.
-            {' '}<em>All legal positions have even parity.</em>
+            {' '}<em>A quarter turn's sticker parity is (−1)^(number of its 4-cycles); the Graph Theory tab breaks this down per orbit.</em>
           </div>
           <div className="perm-trace">
             <div className="perm-trace-row perm-trace-header">
@@ -621,9 +628,9 @@ function PermTraceExplainer() {
         </p>
         <div className="pte-formula">(i₀ i₁ i₂ i₃) means i₀→i₁, i₁→i₂, i₂→i₃, i₃→i₀</div>
         <p className="pte-body">
-          A single 3×3 R move creates 7 such 4-cycles (3 belt cycles + 2 face corner cycles +
-          2 face edge cycles = 7 independent rings). The R face itself accounts for 2 of these;
-          the 5 belt columns account for the rest.
+          A single 3×3 R move creates 5 such 4-cycles: 2 on the R face itself (its 4 corner
+          stickers and its 4 edge stickers) and 3 around the belt, one for each column of
+          stickers on U, F, D and B.
         </p>
       </div>
 
@@ -648,8 +655,10 @@ function PermTraceExplainer() {
           Any permutation can be decomposed into <strong>transpositions</strong> (2-swaps).
           A k-cycle requires k−1 transpositions. Add up all k−1 for every cycle in σ_total:
           if the sum is even → <span style={{color:'#6ee7b7'}}>even parity</span>; odd →
-          <span style={{color:'#f87171'}}> odd parity</span>. Legal cube states are always
-          even — this is why you can't swap just two corners without affecting anything else.
+          <span style={{color:'#f87171'}}> odd parity</span>. Every 3×3 quarter turn is five
+          4-cycles, so it is odd on stickers. The constraint that survives is on pieces: the
+          corner and edge permutations always have equal parity, which is why you can't swap
+          just two corners without affecting anything else.
         </p>
       </div>
     </div>

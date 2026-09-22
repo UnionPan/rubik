@@ -1,16 +1,29 @@
-import { useState, useEffect, useCallback, useRef } from 'react';
-import { ALGORITHMS, ALGORITHM_CATEGORIES, getAlgorithmsForSize, tokenize } from '../lib/algorithms';
-import { applyNotation, parseMove } from '../lib/cubeState';
+import { useState, useEffect, useCallback, useRef, useMemo } from 'react';
+import {
+  ALGORITHMS, ALGORITHM_CATEGORIES, getAlgorithmsForSize, tokenize, usesReducedNotation,
+} from '../lib/algorithms';
+import { applyTurn, parseToken, expandToken } from '../lib/cubeState';
+
+/** The inverse of a quarter turn */
+function invertTurn(t) {
+  const notation = t.notation.endsWith("'") ? t.notation.slice(0, -1) : `${t.notation}'`;
+  return { ...t, cw: !t.cw, notation };
+}
 
 /**
  * AlgorithmPanel
+ * Mount with key={cubeSize}: algorithm tokens are resolved for one cube size.
  * Props:
  *   cubeSize: N
  *   onAlgorithmSelect: fn(algorithm)
- *   onStepState: fn(state, moveIdx, totalMoves)
+ *   onStepState: fn(state, turns) - state after the current step, and the
+ *                quarter turns applied since the algorithm's entry state
  *   baseState: current state to start from
  *   onAlgorithmChange: fn(algo) — tells parent to update algebra panel
  *   detectedPattern: result from detectPattern() in patternRecognition.js
+ *   onAnimateStep: fn(turn, onDone) - animates one quarter turn on cube and graph
+ *   onApplySetup: fn(notation) - plays a setup sequence (e.g. "U'") on the cube
+ *   onEntry: fn() - the stepper is about to start from the current state
  */
 export default function AlgorithmPanel({
   cubeSize = 3,
@@ -19,7 +32,9 @@ export default function AlgorithmPanel({
   baseState,
   onAlgorithmChange,
   detectedPattern = null,
-  onAnimateStep = null,   // animateAlgStep from App: (face, layer, cw, onDone) => void
+  onAnimateStep = null,
+  onApplySetup = null,
+  onEntry = null,
 }) {
   const [selectedCategory, setSelectedCategory] = useState('Beginner');
   const [selectedAlg, setSelectedAlg] = useState(null);
@@ -36,7 +51,25 @@ export default function AlgorithmPanel({
   const algList = getAlgorithmsForSize(cubeSize).filter(
     a => a.category === selectedCategory
   );
-  const tokens = selectedAlg ? tokenize(selectedAlg.notation) : [];
+  const tokens = useMemo(
+    () => (selectedAlg ? tokenize(selectedAlg.notation) : []),
+    [selectedAlg],
+  );
+  // Each token resolved to quarter turns for this cube size.  3×3 algorithms
+  // run on big cubes through the reduction map (see cubeState notation notes).
+  const stepTurns = useMemo(() => {
+    if (!selectedAlg) return [];
+    const reduced = usesReducedNotation(selectedAlg);
+    return tokens.map(tok => {
+      try { return expandToken(parseToken(tok, cubeSize, { reduced })); }
+      catch { return []; }
+    });
+  }, [selectedAlg, tokens, cubeSize]);
+
+  const turnsUpTo = useCallback(
+    (idx) => stepTurns.slice(0, idx + 1).flat(),
+    [stepTurns],
+  );
 
   // Select algorithm — snapshot the current cube state so stepping always starts here
   const selectAlgorithm = useCallback((alg) => {
@@ -52,82 +85,85 @@ export default function AlgorithmPanel({
   const computeState = useCallback((idx) => {
     const entry = entryStateRef.current;
     if (!entry || idx < 0) return entry;
-    let s = entry;
-    for (let i = 0; i <= idx; i++) s = applyNotation(s, tokens[i]);
-    return s;
-  }, [tokens]);
+    return turnsUpTo(idx).reduce(applyTurn, entry);
+  }, [turnsUpTo]);
+
+  // Before the first step, the algorithm starts from whatever the cube shows now
+  // (the user may have made a setup turn since selecting it).
+  const syncEntry = useCallback(() => {
+    if (stepIndex >= 0) return;
+    entryStateRef.current = baseState;
+    onEntry?.();
+  }, [stepIndex, baseState, onEntry]);
 
   // Non-animated fallback: jump state directly.
   const stepTo = useCallback((idx) => {
     if (!selectedAlg) return;
+    syncEntry();
     const s = computeState(idx);
     setStepIndex(idx);
-    if (onStepState) onStepState(s, idx, tokens.length - 1);
-  }, [selectedAlg, computeState, tokens.length, onStepState]);
+    if (onStepState) onStepState(s, turnsUpTo(idx));
+  }, [selectedAlg, syncEntry, computeState, turnsUpTo, onStepState]);
 
-  // Animated step forward: play the 3D animation for tokens[next], then update state.
+  // Play quarter turns one after another, then call onDone
+  const animateTurns = useCallback((turns, onDone) => {
+    const run = (i) => {
+      if (i >= turns.length) { onDone(); return; }
+      onAnimateStep(turns[i], () => run(i + 1));
+    };
+    run(0);
+  }, [onAnimateStep]);
+
+  // Animated step forward: animate tokens[next] (half turns as two quarter turns), then update state.
   const stepForward = useCallback(() => {
     if (stepping) return;
     const next = stepIndex + 1;
     if (next >= tokens.length) { setPlaying(false); return; }
 
-    const mv = parseMove(tokens[next]);
+    syncEntry();
     const targetState = computeState(next);
-
-    if (onAnimateStep && mv) {
-      setStepping(true);
-      setStepIndex(next);
-      // For double moves (F2), chain two 90° animations.
-      const doAnim = (times, onDone) => {
-        if (times <= 0) { onDone(); return; }
-        onAnimateStep(mv.face, mv.layer, mv.cw, () => doAnim(times - 1, onDone));
-      };
-      doAnim(mv.double ? 2 : 1, () => {
-        setStepping(false);
-        if (onStepState) onStepState(targetState, next, tokens.length - 1);
-        if (next >= tokens.length - 1) setPlaying(false);
-      });
-    } else {
-      // No animation: just snap.
-      setStepIndex(next);
-      if (onStepState) onStepState(targetState, next, tokens.length - 1);
+    const history = turnsUpTo(next);
+    const done = () => {
+      if (onStepState) onStepState(targetState, history);
       if (next >= tokens.length - 1) setPlaying(false);
+    };
+
+    setStepIndex(next);
+    if (onAnimateStep) {
+      setStepping(true);
+      animateTurns(stepTurns[next], () => { setStepping(false); done(); });
+    } else {
+      done();
     }
-  }, [stepping, stepIndex, tokens, computeState, onAnimateStep, onStepState]);
+  }, [stepping, stepIndex, tokens.length, syncEntry, computeState, turnsUpTo, stepTurns, onAnimateStep, animateTurns, onStepState]);
 
   // Animated step backward: play the inverse of the current token, then update state.
   const stepBack = useCallback(() => {
-    if (stepping) return;
+    if (stepping || stepIndex < 0) return;
     const prev = stepIndex - 1;
     const targetState = prev < 0 ? entryStateRef.current : computeState(prev);
+    const history = turnsUpTo(prev);
+    const inverse = [...stepTurns[stepIndex]].reverse().map(invertTurn);
 
-    if (stepIndex >= 0 && onAnimateStep) {
-      const mv = parseMove(tokens[stepIndex]);
-      if (mv) {
-        setStepping(true);
-        setStepIndex(prev);
-        const doAnim = (times, onDone) => {
-          if (times <= 0) { onDone(); return; }
-          onAnimateStep(mv.face, mv.layer, !mv.cw, () => doAnim(times - 1, onDone));
-        };
-        doAnim(mv.double ? 2 : 1, () => {
-          setStepping(false);
-          if (onStepState) onStepState(targetState, prev, tokens.length - 1);
-        });
-        return;
-      }
-    }
-    // Fallback / already at start
     setStepIndex(prev);
-    if (onStepState) onStepState(targetState, prev, tokens.length - 1);
-  }, [stepping, stepIndex, tokens, computeState, onAnimateStep, onStepState]);
+    if (onAnimateStep) {
+      setStepping(true);
+      animateTurns(inverse, () => {
+        setStepping(false);
+        if (onStepState) onStepState(targetState, history);
+      });
+    } else if (onStepState) {
+      onStepState(targetState, history);
+    }
+  }, [stepping, stepIndex, computeState, turnsUpTo, stepTurns, onAnimateStep, animateTurns, onStepState]);
 
   const reset = useCallback(() => {
+    if (stepIndex < 0) return; // not started: nothing to undo
     setStepIndex(-1);
     setPlaying(false);
     setStepping(false);
-    if (onStepState) onStepState(entryStateRef.current, -1, tokens.length - 1);
-  }, [tokens.length, onStepState]);
+    if (onStepState) onStepState(entryStateRef.current, []);
+  }, [stepIndex, onStepState]);
 
   // Auto-play
   useEffect(() => {
@@ -139,6 +175,9 @@ export default function AlgorithmPanel({
   // Keyboard controls
   useEffect(() => {
     const onKey = e => {
+      // Leave keys alone while typing or when another control handled them
+      if (e.defaultPrevented) return;
+      if (e.target.closest?.('input, textarea, select, [contenteditable="true"], [role="separator"]')) return;
       if (e.key === 'ArrowRight') stepForward();
       if (e.key === 'ArrowLeft') stepBack();
       if (e.key === ' ') { e.preventDefault(); setPlaying(p => !p); }
@@ -163,16 +202,19 @@ export default function AlgorithmPanel({
       {detectedPattern && (
         <PatternDetector
           pattern={detectedPattern}
+          cubeSize={cubeSize}
           onJump={detectedPattern.matchedAlg ? () => jumpToAlg(detectedPattern.matchedAlg.id) : null}
+          onApplySetup={onApplySetup}
+          selectedAlgId={selectedAlg?.id}
         />
       )}
 
       {/* Stage explanation strip */}
       <div className="stage-explainer">
         <span className="stage-explainer-text">
-          {cubeSize === 3
-            ? 'CFOP method: Cross → F2L → OLL → PLL. Select a stage above to see algorithms.'
-            : 'Big cube: reduce to 3×3 first. Then apply CFOP last-layer algorithms.'}
+          {cubeSize === 2 && 'Layer by layer: first layer → OLL → PLL. 3×3 last-layer algorithms act on the corners alone.'}
+          {cubeSize === 3 && 'CFOP method: Cross → F2L → OLL → PLL. Select a stage above to see algorithms.'}
+          {cubeSize > 3 && 'Reduction: solve the centers, pair the edges, then solve it like a 3×3. 3×3 algorithms run on the reduced cube with M, E, S and wide turns covering all inner slices.'}
         </span>
       </div>
 
@@ -290,44 +332,89 @@ export default function AlgorithmPanel({
 // ── PatternDetector ─────────────────────────────────────────────────────────
 
 const STAGE_META = {
-  solved:    { label: 'Solved',    color: 'var(--green)',  icon: '✓' },
-  pll:       { label: 'PLL',       color: 'var(--blue)',   icon: '⤢' },
-  oll:       { label: 'OLL',       color: 'var(--yellow)', icon: '◑' },
-  f2l:       { label: 'F2L',       color: 'var(--orange)', icon: '⬛' },
-  cross:     { label: 'Cross',     color: 'var(--orange)', icon: '✛' },
-  scrambled: { label: 'Scrambled', color: 'var(--red)',    icon: '⟳' },
-  other:     { label: 'N/A',       color: '#666',          icon: '—' },
+  solved:        { color: '#34d399', icon: '✓' },
+  'first-layer': { color: '#fb923c', icon: '▭' },
+  centers:       { color: '#c4b5fd', icon: '▣' },
+  edges:         { color: '#7dd3fc', icon: '═' },
+  cross:         { color: '#fb923c', icon: '✛' },
+  f2l:           { color: '#fdba74', icon: '⬛' },
+  oll:           { color: '#fde047', icon: '◑' },
+  'oll-parity':  { color: '#fca5a5', icon: '±' },
+  pll:           { color: '#93c5fd', icon: '⤢' },
+  'pll-parity':  { color: '#fca5a5', icon: '±' },
 };
 
-function PatternDetector({ pattern, onJump }) {
-  const meta = STAGE_META[pattern.stage] || STAGE_META.other;
+function PatternDetector({ pattern, cubeSize, onJump, onApplySetup, selectedAlgId }) {
+  const meta = STAGE_META[pattern.stage] || STAGE_META.cross;
+  const { progress, matchedAlg } = pattern;
+  const isParity = pattern.stage.endsWith('parity');
 
   return (
-    <div className="pattern-detector">
+    <div className={`pattern-detector${isParity ? ' parity' : ''}`} style={{ borderLeftColor: meta.color }}>
       <div className="pd-header">
-        <span className="pd-label">Pattern Detector</span>
+        <span className="pd-label">Pattern Detector · {pattern.method} {cubeSize}×{cubeSize}</span>
         <span className="pd-stage-badge" style={{ background: meta.color }}>
-          {meta.icon} {meta.label}
+          {meta.icon} {pattern.stageLabel}
         </span>
       </div>
+
+      {pattern.steps.length > 0 && (
+        <ol className="pd-steps" aria-label="Solve stages">
+          {pattern.steps.map(st => (
+            <li key={st.id} className={`pd-step ${st.status}`}>
+              {st.status === 'done' ? '✓ ' : ''}{st.label}
+            </li>
+          ))}
+        </ol>
+      )}
+
       <div className="pd-message">{pattern.message}</div>
-      {pattern.matchedAlg && (
-        <div className="pd-match">
-          <span className="pd-match-name">{pattern.matchedAlg.name}</span>
-          <span className="pd-match-notation">{pattern.matchedAlg.notation}</span>
-          {onJump && (
-            <button className="pd-jump-btn" onClick={onJump}>
-              → View algorithm
-            </button>
-          )}
+
+      {progress && (
+        <div className="pd-progress" title={`${progress.done} of ${progress.total} ${progress.unit}`}>
+          <span className="pd-progress-bar">
+            <span className="pd-progress-fill" style={{ width: `${(progress.done / progress.total) * 100}%`, background: meta.color }} />
+          </span>
+          <span className="pd-progress-text">{progress.done}/{progress.total} {progress.unit}</span>
         </div>
       )}
-      {pattern.edgeInfo && !pattern.matchedAlg && (
+
+      {matchedAlg && (
+        <div className="pd-match">
+          <span className="pd-match-kind">{pattern.matchKind === 'exact' ? 'Detected' : 'Try'}</span>
+          <span className="pd-chain">
+            {pattern.setup && <span className="pd-auf" title="Turn the top layer first">{pattern.setup}</span>}
+            {pattern.setup && <span className="pd-arrow">→</span>}
+            <span className="pd-match-name">{matchedAlg.name}</span>
+            {pattern.finish && <span className="pd-arrow">→</span>}
+            {pattern.finish && <span className="pd-auf" title="Turn the top layer afterwards">{pattern.finish}</span>}
+          </span>
+          <span className="pd-match-notation">{matchedAlg.notation}</span>
+          <span className="pd-actions">
+            {pattern.setup && onApplySetup && (
+              <button className="pd-jump-btn secondary" onClick={() => onApplySetup(pattern.setup)}>
+                Do {pattern.setup}
+              </button>
+            )}
+            {onJump && selectedAlgId !== matchedAlg.id && (
+              <button className="pd-jump-btn" onClick={onJump}>→ View algorithm</button>
+            )}
+          </span>
+        </div>
+      )}
+
+      {pattern.edgeInfo && !matchedAlg && (
         <div className="pd-edge-info">
           <span className={`pd-edge-badge ${pattern.edgeInfo.pattern}`}>
             {pattern.edgeInfo.label}
           </span>
         </div>
+      )}
+
+      {pattern.notes.length > 0 && (
+        <ul className="pd-notes">
+          {pattern.notes.map(n => <li key={n}>{n}</li>)}
+        </ul>
       )}
     </div>
   );

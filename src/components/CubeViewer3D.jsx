@@ -1,6 +1,7 @@
 import { useRef, useEffect, useCallback } from 'react';
 import * as THREE from 'three';
-import { FACE, applyMove } from '../lib/cubeState';
+import { FACE, applyTurn, turnToNotation } from '../lib/cubeState';
+import { easeInOutQuad, tweenProgress } from '../lib/tween';
 
 // Official WCA face colors
 const FACE_COLOR_MAP = [
@@ -11,7 +12,7 @@ const FACE_COLOR_MAP = [
   '#FF5800', // L orange
   '#0046AD', // B blue
 ];
-const INNER_COLOR = '#111122';
+const INNER_COLOR = '#16130d';
 
 // Rotation axis & sign for each face CW move
 // Proved from coordinate geometry: rotating +Y layer CW (from above) = -π/2 around +Y
@@ -59,6 +60,30 @@ function updateCubieCoordsCW(cubie, face, N) {
   }
 }
 
+// Faces on the positive / negative end of each axis (x, y, z)
+const AXIS_FACES = [['R', 'L'], ['U', 'D'], ['F', 'B']];
+const DRAG_THRESHOLD_PX = 10;
+
+/**
+ * The layer turn a drag across a sticker asks for.
+ *   normal: outward normal of the touched sticker (a unit axis vector)
+ *   dir:    in-plane direction the sticker should move (a unit axis vector)
+ * Rotating about a = normal × dir by +90° carries the sticker along dir.
+ */
+function turnForDrag(cubie, normal, dir, N) {
+  const a = new THREE.Vector3().crossVectors(normal, dir);
+  const k = [Math.abs(a.x), Math.abs(a.y), Math.abs(a.z)].indexOf(1);
+  if (k < 0) return null;
+  const sign = Math.sign([a.x, a.y, a.z][k]); // +1: counter-clockwise about +axis
+  const coord = [cubie.x, cubie.y, cubie.z][k];
+  const [posFace, negFace] = AXIS_FACES[k];
+  // A clockwise turn of the positive face is −90° about +axis, of the negative face +90°
+  const turn = coord >= N / 2
+    ? { face: posFace, layers: [N - 1 - coord], cw: sign < 0 }
+    : { face: negFace, layers: [coord], cw: sign > 0 };
+  return { ...turn, notation: turnToNotation(turn, N) };
+}
+
 // Which cubies belong to a given face+layer slice?
 function getCubiesInSlice(cubies, face, layer, N) {
   return cubies.filter(({ x, y, z }) => {
@@ -101,9 +126,11 @@ function getCubieColors(state, N, cx, cy, cz) {
  *   state: 6×N×N array
  *   size: N
  *   highlightFace: 'U'|'R'|'F'|'D'|'L'|'B'|null
- *   animateMoveRef: ref — parent sets animateMoveRef.current = fn(face, layer, cw, cb)
+ *   animateMoveRef: ref — this component sets animateMoveRef.current =
+ *                   fn(turn, durationMs, onComplete, startTime), where turn is
+ *                   { face, layers, cw } (all layers rotate together)
  */
-export default function CubeViewer3D({ state, size = 3, highlightFace = null, animateMoveRef = null }) {
+export default function CubeViewer3D({ state, size = 3, highlightFace = null, animateMoveRef = null, onTurn = null }) {
   const mountRef    = useRef(null);
   const sceneRef    = useRef(null);
   const cameraRef   = useRef(null);
@@ -111,8 +138,11 @@ export default function CubeViewer3D({ state, size = 3, highlightFace = null, an
   const frameRef    = useRef(null);
 
   // Orbit state
-  const rotRef   = useRef({ theta: 0.6, phi: -0.4 }); // theta=azimuth, phi=elevation
-  const mouseRef = useRef({ down: false, x: 0, y: 0 });
+  // Default view: looking down at the URF corner (U on top, F left, R right),
+  // the same corner the facelet graph is centred on.
+  const rotRef   = useRef({ theta: 0.62, phi: 0.5 }); // theta=azimuth, phi=elevation
+  const onTurnRef = useRef(onTurn);
+  useEffect(() => { onTurnRef.current = onTurn; }, [onTurn]);
 
   // Cubie registry: [{mesh, x, y, z}] — logical coords in 0..N-1
   const cubiesRef = useRef([]);
@@ -128,8 +158,12 @@ export default function CubeViewer3D({ state, size = 3, highlightFace = null, an
 
   // ── Build geometry (run once per size change) ──────────────────────────
   const buildCubies = useCallback((N, scene, initState) => {
-    // Remove old cubies
-    cubiesRef.current.forEach(({ mesh }) => scene.remove(mesh));
+    // Remove old cubies and free their GPU buffers
+    cubiesRef.current.forEach(({ mesh }) => {
+      scene.remove(mesh);
+      mesh.geometry.dispose();
+      mesh.material.forEach(m => m.dispose());
+    });
     cubiesRef.current = [];
 
     // Scale cubie size inversely with N so cube always spans ~3 units total
@@ -194,15 +228,18 @@ export default function CubeViewer3D({ state, size = 3, highlightFace = null, an
     const h = el.clientHeight || 420;
 
     const scene    = new THREE.Scene();
-    scene.background = new THREE.Color('#0d0d1a');
+    scene.background = new THREE.Color('#100e0a');
     sceneRef.current = scene;
 
     const camera = new THREE.PerspectiveCamera(42, w / h, 0.1, 100);
     cameraRef.current = camera;
 
-    const ambient = new THREE.AmbientLight(0xffffff, 0.65);
+    // Physically based light units (three r155+): Lambert shading divides by π,
+    // so these values put the lit U face at full white while F and R keep
+    // visible shading (≈ 0.83 and 0.72 of full brightness in linear light).
+    const ambient = new THREE.AmbientLight(0xffffff, 1.4);
     scene.add(ambient);
-    const dir = new THREE.DirectionalLight(0xffffff, 0.9);
+    const dir = new THREE.DirectionalLight(0xffffff, 2.3);
     dir.position.set(5, 10, 7);
     scene.add(dir);
 
@@ -215,9 +252,18 @@ export default function CubeViewer3D({ state, size = 3, highlightFace = null, an
     buildCubies(sizeRef.current, scene, stateRef.current);
 
     // ── Orbit: spherical coords ──
+    // Distance that keeps the whole cube (bounding sphere ≈ 2.9 units) in frame
+    // for both the vertical FOV and, in narrow viewports, the horizontal one.
+    const fitRadius = () => {
+      const CUBE_RADIUS = 2.9;
+      const vHalf = THREE.MathUtils.degToRad(camera.fov / 2);
+      const hHalf = Math.atan(Math.tan(vHalf) * camera.aspect);
+      return Math.max(9, CUBE_RADIUS / Math.sin(Math.min(vHalf, hHalf)));
+    };
+
     const updateCamera = () => {
       const { theta, phi } = rotRef.current;
-      const radius = 9;
+      const radius = fitRadius();
       const clampedPhi = Math.max(-Math.PI/2 + 0.05, Math.min(Math.PI/2 - 0.05, phi));
       camera.position.set(
         radius * Math.cos(clampedPhi) * Math.sin(theta),
@@ -227,39 +273,79 @@ export default function CubeViewer3D({ state, size = 3, highlightFace = null, an
       camera.lookAt(0, 0, 0);
     };
 
-    // Mouse drag
-    const onDown = e => { mouseRef.current = { down: true, x: e.clientX, y: e.clientY }; };
-    const onMove = e => {
-      if (!mouseRef.current.down) return;
-      const dx = e.clientX - mouseRef.current.x;
-      const dy = e.clientY - mouseRef.current.y;
-      mouseRef.current.x = e.clientX;
-      mouseRef.current.y = e.clientY;
-      // Drag right → cube appears to rotate right → camera orbits left → theta decreases
-      rotRef.current.theta -= dx * 0.012;
-      rotRef.current.phi   += dy * 0.012; // drag down → camera drops → see top face
-    };
-    const onUp = () => { mouseRef.current.down = false; };
+    // Pointer input (mouse, touch, pen):
+    //   drag starting on a sticker → turn that sticker's layer in the drag direction
+    //   drag starting on the background → orbit the camera
+    const raycaster = new THREE.Raycaster();
+    let gesture = null; // { mode: 'orbit'|'turn'|'done', id, x, y, hit }
 
-    // Touch drag
-    let lastTouch = null;
-    const onTStart = e => {
-      if (e.touches.length === 1) lastTouch = { x: e.touches[0].clientX, y: e.touches[0].clientY };
-    };
-    const onTMove = e => {
-      if (e.touches.length !== 1 || !lastTouch) return;
-      const dx = e.touches[0].clientX - lastTouch.x;
-      const dy = e.touches[0].clientY - lastTouch.y;
-      lastTouch = { x: e.touches[0].clientX, y: e.touches[0].clientY };
-      rotRef.current.theta -= dx * 0.012;
-      rotRef.current.phi   += dy * 0.012;
+    const hitSticker = (clientX, clientY) => {
+      if (animatingRef.current) return null; // cubie coords are stale mid-turn
+      const rect = el.getBoundingClientRect();
+      const ndc = new THREE.Vector2(
+        ((clientX - rect.left) / rect.width) * 2 - 1,
+        -((clientY - rect.top) / rect.height) * 2 + 1,
+      );
+      raycaster.setFromCamera(ndc, camera);
+      const hit = raycaster.intersectObjects(cubiesRef.current.map(c => c.mesh), false)[0];
+      if (!hit) return null;
+      const cubie = cubiesRef.current.find(c => c.mesh === hit.object);
+      const normal = hit.face.normal.clone().round(); // meshes are unrotated between turns
+      return { cubie, normal, point: hit.point };
     };
 
-    el.addEventListener('mousedown', onDown);
-    window.addEventListener('mousemove', onMove);
-    window.addEventListener('mouseup', onUp);
-    el.addEventListener('touchstart', onTStart, { passive: true });
-    el.addEventListener('touchmove',  onTMove,  { passive: true });
+    // Screen direction (pixels) of a world-space step from p along axis u
+    const screenStep = (p, u) => {
+      const rect = el.getBoundingClientRect();
+      const a = p.clone().project(camera), b = p.clone().addScaledVector(u, 0.5).project(camera);
+      return new THREE.Vector2((b.x - a.x) * rect.width / 2, -(b.y - a.y) * rect.height / 2);
+    };
+
+    const onPointerDown = (e) => {
+      if (e.button !== 0 || gesture) return;
+      const hit = hitSticker(e.clientX, e.clientY);
+      gesture = { mode: hit ? 'turn' : 'orbit', id: e.pointerId, x: e.clientX, y: e.clientY, hit };
+      el.setPointerCapture(e.pointerId);
+    };
+    const onPointerMove = (e) => {
+      if (!gesture || e.pointerId !== gesture.id) return;
+      const dx = e.clientX - gesture.x;
+      const dy = e.clientY - gesture.y;
+      if (gesture.mode === 'orbit') {
+        gesture.x = e.clientX;
+        gesture.y = e.clientY;
+        // Drag right → cube appears to rotate right → camera orbits left → theta decreases
+        rotRef.current.theta -= dx * 0.012;
+        rotRef.current.phi   += dy * 0.012; // drag down → camera rises → see more of the top face
+        return;
+      }
+      if (gesture.mode !== 'turn' || Math.hypot(dx, dy) < DRAG_THRESHOLD_PX) return;
+      // Pick the in-plane axis whose on-screen direction best matches the drag
+      const { cubie, normal, point } = gesture.hit;
+      const drag = new THREE.Vector2(dx, dy);
+      let best = null;
+      for (const axis of [new THREE.Vector3(1, 0, 0), new THREE.Vector3(0, 1, 0), new THREE.Vector3(0, 0, 1)]) {
+        if (Math.abs(axis.dot(normal)) > 0.5) continue;
+        const step = screenStep(point, axis);
+        const len = step.length();
+        if (len < 1e-6) continue;
+        const score = drag.dot(step) / len;
+        if (!best || Math.abs(score) > Math.abs(best.score)) best = { axis, score };
+      }
+      gesture.mode = 'done';
+      if (!best) return;
+      const dir = best.axis.clone().multiplyScalar(Math.sign(best.score));
+      const turn = turnForDrag(cubie, normal, dir, sizeRef.current);
+      if (turn) onTurnRef.current?.(turn);
+    };
+    const onPointerUp = (e) => {
+      if (gesture && e.pointerId === gesture.id) gesture = null;
+    };
+
+    el.addEventListener('pointerdown', onPointerDown);
+    el.addEventListener('pointermove', onPointerMove);
+    el.addEventListener('pointerup', onPointerUp);
+    el.addEventListener('pointercancel', onPointerUp);
 
     // Render loop
     const animate = () => {
@@ -280,11 +366,10 @@ export default function CubeViewer3D({ state, size = 3, highlightFace = null, an
 
     return () => {
       cancelAnimationFrame(frameRef.current);
-      el.removeEventListener('mousedown', onDown);
-      window.removeEventListener('mousemove', onMove);
-      window.removeEventListener('mouseup', onUp);
-      el.removeEventListener('touchstart', onTStart);
-      el.removeEventListener('touchmove',  onTMove);
+      el.removeEventListener('pointerdown', onPointerDown);
+      el.removeEventListener('pointermove', onPointerMove);
+      el.removeEventListener('pointerup', onPointerUp);
+      el.removeEventListener('pointercancel', onPointerUp);
       ro.disconnect();
       renderer.dispose();
       if (el.contains(renderer.domElement)) el.removeChild(renderer.domElement);
@@ -309,21 +394,22 @@ export default function CubeViewer3D({ state, size = 3, highlightFace = null, an
     refreshColors(stateRef.current, sizeRef.current);
   }, [highlightFace, refreshColors]);
 
-  // ── Animate a slice move ──────────────────────────────────────────────
-  const animateSlice = useCallback((face, layer, cw, durationMs = 280, onComplete) => {
+  // ── Animate a quarter turn of one or more parallel layers ─────────────
+  const animateSlice = useCallback((turn, durationMs = 280, onComplete, startTime) => {
     if (animatingRef.current || !sceneRef.current) {
       onComplete?.();
       return;
     }
     animatingRef.current = true;
 
+    const { face, layers, cw } = turn;
     const N      = sizeRef.current;
     const scene  = sceneRef.current;
     const anim   = FACE_ANIM[face];
     const angle  = (Math.PI / 2) * anim.sign * (cw ? 1 : -1);
 
-    // Collect cubies in this slice
-    const slice = getCubiesInSlice(cubiesRef.current, face, layer, N);
+    // Collect cubies in the turning layers (wide moves and rotations turn several)
+    const slice = layers.flatMap(layer => getCubiesInSlice(cubiesRef.current, face, layer, N));
 
     // Parent them to a pivot Group
     const pivot = new THREE.Group();
@@ -337,7 +423,8 @@ export default function CubeViewer3D({ state, size = 3, highlightFace = null, an
     });
 
     // Tween rotation
-    const start    = performance.now();
+    // startTime lets the parent share one clock with the facelet graph
+    const start    = startTime ?? performance.now();
     const quatStart = new THREE.Quaternion();
     const quatEnd   = new THREE.Quaternion();
     quatEnd.setFromAxisAngle(anim.axis, angle);
@@ -352,9 +439,8 @@ export default function CubeViewer3D({ state, size = 3, highlightFace = null, an
     let finalHeld = false;
 
     const tick = (now) => {
-      const t = Math.min((now - start) / durationMs, 1);
-      // Ease in-out quadratic
-      const et = t < 0.5 ? 2*t*t : -1 + (4-2*t)*t;
+      const t  = tweenProgress(now, start, durationMs);
+      const et = easeInOutQuad(t);
       pivot.quaternion.slerpQuaternions(quatStart, quatEnd, et);
 
       if (t < 1) {
@@ -387,7 +473,7 @@ export default function CubeViewer3D({ state, size = 3, highlightFace = null, an
         // Compute post-move state directly — don't wait for React's async re-render.
         // stateRef.current is the pre-move state; onComplete calls setState (batched/
         // deferred), so we'd read stale state if we called refreshColors afterward.
-        const postState = applyMove(stateRef.current, face, layer, cw);
+        const postState = applyTurn(stateRef.current, turn);
         stateRef.current = postState;
         onComplete?.();
         refreshColors(postState, N);
@@ -405,60 +491,7 @@ export default function CubeViewer3D({ state, size = 3, highlightFace = null, an
   return (
     <div
       ref={mountRef}
-      style={{ width: '100%', height: '100%', cursor: 'grab', userSelect: 'none' }}
+      style={{ width: '100%', height: '100%', cursor: 'grab', userSelect: 'none', touchAction: 'none' }}
     />
-  );
-}
-
-// ── FlatCubeMap ────────────────────────────────────────────────────────────
-export function FlatCubeMap({ state, size = 3, highlightFace = null }) {
-  const N = size;
-  const cellSize = Math.min(32, Math.floor(180 / N));
-  const gap = 2;
-  const faceW = N * (cellSize + gap);
-  const faceIdx = { U: FACE.U, R: FACE.R, F: FACE.F, D: FACE.D, L: FACE.L, B: FACE.B };
-
-  const faceLayout = [
-    { face: 'U', col: 1, row: 0 },
-    { face: 'L', col: 0, row: 1 },
-    { face: 'F', col: 1, row: 1 },
-    { face: 'R', col: 2, row: 1 },
-    { face: 'B', col: 3, row: 1 },
-    { face: 'D', col: 1, row: 2 },
-  ];
-
-  const totalW = 4 * (faceW + gap);
-  const totalH = 3 * (faceW + gap);
-
-  return (
-    <svg width={totalW} height={totalH} style={{ display: 'block', margin: '0 auto' }}>
-      {faceLayout.map(({ face, col, row }) => {
-        const fi   = faceIdx[face];
-        const ox   = col * (faceW + gap);
-        const oy   = row * (faceW + gap);
-        const isHL = highlightFace === face;
-        return (
-          <g key={face}>
-            <text x={ox + faceW/2} y={oy - 3} textAnchor="middle" fontSize={11}
-              fill={isHL ? '#a78bfa' : '#777'} fontFamily="monospace" fontWeight="bold"
-            >{face}</text>
-            {state[fi].map((rowArr, r) =>
-              rowArr.map((color, c) => (
-                <rect
-                  key={`${r}-${c}`}
-                  x={ox + c * (cellSize + gap)}
-                  y={oy + r * (cellSize + gap)}
-                  width={cellSize} height={cellSize}
-                  fill={FACE_COLOR_MAP[color]}
-                  stroke={isHL ? '#a78bfa' : '#2a2a3e'}
-                  strokeWidth={isHL ? 2 : 1}
-                  rx={3}
-                />
-              ))
-            )}
-          </g>
-        );
-      })}
-    </svg>
   );
 }

@@ -154,66 +154,181 @@ function applyBeltCycle(s, face, l, i, N, cw) {
   }
 }
 
-/**
- * Parse and apply a move sequence string, e.g. "R U R' U'"
- * Returns new state.
- */
-export function applyMoveSequence(state, sequence) {
-  const moves = parseMoveSequence(sequence);
-  return moves.reduce((s, mv) => applyMove(s, mv.face, mv.layer, mv.cw), state);
-}
+// ─── Notation ─────────────────────────────────────────────────────────────
+//
+// A *turn* is one quarter turn of one or more parallel layers:
+//   { face, layers: number[], cw, notation }
+// layer 0 is the named face, layer N-1 the opposite face.
+//
+// Native notation (WCA / SiGN, used for typed input and big-cube algorithms):
+//   R R' R2       outer layer
+//   2R  3R        a single inner layer (2nd, 3rd from R)
+//   Rw  r  3Rw    wide: the outer 2 (or n) layers
+//   M E S         middle slice (central slice on odd cubes, all inner slices
+//                 on even cubes); M follows L, E follows D, S follows F
+//   x y z         whole-cube rotation, following R, U, F
+//
+// Reduced notation (3×3 algorithms run on an N×N cube): the token is read as
+// a 3×3 move, then each 3×3 layer is mapped to the big cube - outer layer to
+// outer layer, the 3×3 middle slice to all inner slices.  That is how a 3×3
+// algorithm acts on a big cube after reduction (centers and paired edges).
 
-/**
- * Parse a move sequence string like "R U R' U' F2 3Rw"
- * Returns array of {face, layer, cw, notation}
- */
-export function parseMoveSequence(sequence) {
-  // Matches: optional layer prefix (e.g. "3"), face letter, optional 'w', optional "'" or "2"
-  const re = /(\d*)([URFDLB])(w?)(\d*)('{0,3})/gi;
-  const moves = [];
-  let m;
-  while ((m = re.exec(sequence)) !== null) {
-    const [, layerPfx, faceChar, , numSuffix, prime] = m;
-    const face = faceChar.toUpperCase();
-    const layer = layerPfx ? parseInt(layerPfx) - 1 : 0;
-    const cw = prime === "'" ? false : true;
+const TOKEN_RE = /^(\d*)([URFDLBMESxyzurfdlb])(w?)(2'|'2|2|')?$/;
+const SLICE_FACE = { M: 'L', E: 'D', S: 'F' };
+const ROTATION_FACE = { x: 'R', y: 'U', z: 'F' };
 
-    // For "2" suffix, apply move twice
-    const times = numSuffix === '2' ? 2 : (prime === "''" ? 2 : 1);
-    for (let t = 0; t < times; t++) {
-      moves.push({ face, layer, cw, notation: m[0] });
-    }
-    if (times === 1 && numSuffix !== '2') {
-      // already pushed once, remove the extra
-      if (moves.length > 1 && moves[moves.length-1] === moves[moves.length-2]) {
-        moves.pop();
-      }
-    }
+export class MoveParseError extends Error {}
+
+const range = (a, b) => Array.from({ length: Math.max(0, b - a) }, (_, i) => a + i);
+
+/** Layers of a native token on an N×N cube, or throw */
+function nativeLayers(token, prefix, letter, wide, N) {
+  const n = prefix ? parseInt(prefix, 10) : null;
+  if (ROTATION_FACE[letter]) {
+    if (prefix || wide) throw new MoveParseError(`"${token}" is not a valid rotation`);
+    return { face: ROTATION_FACE[letter], layers: range(0, N) };
   }
-  return moves;
+  if (SLICE_FACE[letter]) {
+    if (prefix || wide) throw new MoveParseError(`"${token}" is not a valid slice move`);
+    if (N < 3) throw new MoveParseError(`"${token}" needs a cube with inner layers`);
+    const layers = N % 2 ? [(N - 1) / 2] : range(1, N - 1);
+    return { face: SLICE_FACE[letter], layers };
+  }
+  const face = letter.toUpperCase();
+  const isWide = wide || letter !== face; // Rw or r
+  if (isWide) {
+    const depth = n ?? 2;
+    if (depth < 1 || depth > N) throw new MoveParseError(`"${token}" turns ${depth} layers, but the cube has ${N}`);
+    return { face, layers: range(0, depth) };
+  }
+  const layer = (n ?? 1) - 1;
+  if (layer < 0 || layer >= N) throw new MoveParseError(`"${token}" needs a cube with at least ${layer + 1} layers`);
+  return { face, layers: [layer] };
 }
 
-/** Simpler parser used by algorithm engine */
-export function parseMove(notation) {
-  const m = notation.trim().match(/^(\d*)([URFDLB])(w?)(\d*)('{0,3})$/i);
-  if (!m) return null;
-  const [, layerPfx, faceChar, , numSuffix, prime] = m;
-  const face = faceChar.toUpperCase();
-  const layer = layerPfx ? parseInt(layerPfx) - 1 : 0;
-  const double = numSuffix === '2';
-  const cw = prime === "'" ? false : true;
-  return { face, layer, cw, double };
+/** Map a 3×3 layer index to N×N layers (reduction) */
+function reducedLayers(layer3, N) {
+  if (layer3 === 0) return [0];
+  if (layer3 === 2) return [N - 1];
+  return range(1, N - 1);
 }
 
 /**
- * Apply a single move notation string (e.g. "R", "U'", "F2", "2R")
+ * Parse one token, e.g. "R", "U2", "Rw'", "2R", "M2", "x".
+ * Returns { face, layers, cw, turns, token } (turns = 1 or 2).
+ * Throws MoveParseError for unknown or impossible tokens.
  */
-export function applyNotation(state, notation) {
-  const mv = parseMove(notation);
-  if (!mv) return state;
-  let s = applyMove(state, mv.face, mv.layer, mv.cw);
-  if (mv.double) s = applyMove(s, mv.face, mv.layer, mv.cw);
-  return s;
+export function parseToken(token, N, { reduced = false } = {}) {
+  const m = TOKEN_RE.exec(token);
+  if (!m) throw new MoveParseError(`Unknown move "${token}"`);
+  const [, prefix, letter, wide, suffix = ''] = m;
+  const turns = suffix.includes('2') ? 2 : 1;
+  const cw = !suffix.includes("'");
+
+  let face, layers;
+  if (reduced && N !== 3) {
+    const base = nativeLayers(token, prefix, letter, wide, 3);
+    face = base.face;
+    layers = [...new Set(base.layers.flatMap(l => reducedLayers(l, N)))].filter(l => l >= 0 && l < N);
+  } else {
+    ({ face, layers } = nativeLayers(token, prefix, letter, wide, N));
+  }
+  return { face, layers, cw, turns, token };
+}
+
+/** Notation for one quarter turn of a parsed token ("Rw2'" → "Rw'") */
+function quarterNotation(token) {
+  return token.replace(/2'|'2/, "'").replace(/2$/, '');
+}
+
+/** Expand a parsed token into quarter turns */
+export function expandToken(parsed) {
+  const notation = parsed.turns === 2 ? quarterNotation(parsed.token) : parsed.token;
+  const turn = { face: parsed.face, layers: parsed.layers, cw: parsed.cw, notation };
+  return parsed.turns === 2 ? [turn, { ...turn }] : [turn];
+}
+
+/** Split a sequence into tokens; tolerates missing spaces ("RUR'U'") and brackets */
+export function tokenizeSequence(sequence) {
+  const cleaned = (sequence || '').replace(/[()[\],]/g, ' ');
+  const tokens = [];
+  const re = /(\d*)([URFDLBMESxyzurfdlb])(w?)(2'|'2|2|')?/g;
+  let last = 0;
+  let m;
+  while ((m = re.exec(cleaned)) !== null) {
+    const gap = cleaned.slice(last, m.index);
+    if (gap.trim()) throw new MoveParseError(`Unknown move "${gap.trim()}"`);
+    tokens.push(m[0]);
+    last = m.index + m[0].length;
+  }
+  const tail = cleaned.slice(last);
+  if (tail.trim()) throw new MoveParseError(`Unknown move "${tail.trim()}"`);
+  return tokens;
+}
+
+/**
+ * Parse a sequence into quarter turns [{ face, layers, cw, notation }].
+ * A half turn ("F2") becomes two quarter turns ("F F"), so move history and
+ * permutation traces compose the right number of turns.
+ * Throws MoveParseError on an invalid token.
+ */
+export function parseMoveSequence(sequence, N = 3, options) {
+  return tokenizeSequence(sequence).flatMap(tok => expandToken(parseToken(tok, N, options)));
+}
+
+const OPPOSITE_FACE = { U: 'D', D: 'U', R: 'L', L: 'R', F: 'B', B: 'F' };
+const SLICE_OF = { L: ['M', true], R: ['M', false], D: ['E', true], U: ['E', false], F: ['S', true], B: ['S', false] };
+const ROTATION_OF = { R: ['x', true], L: ['x', false], U: ['y', true], D: ['y', false], F: ['z', true], B: ['z', false] };
+
+/**
+ * Native notation that parses back to exactly this quarter turn on an N×N
+ * cube (a turn made from reduced notation, like "f" on a 4×4, has no
+ * single native token for its layers, so this may return several tokens).
+ */
+export function turnToNotation(turn, N) {
+  const layers = [...new Set(turn.layers)].sort((a, b) => a - b);
+  const prime = (cw) => (cw ? '' : "'");
+  if (layers.length === 0) return '';
+  if (layers.length === N) {
+    const [rot, same] = ROTATION_OF[turn.face];
+    return rot + prime(same ? turn.cw : !turn.cw);
+  }
+  // Middle slice: the central layer (odd N) or all inner layers (even N)
+  const middle = N % 2 ? [(N - 1) / 2] : range(1, N - 1);
+  if (N >= 3 && layers.length === middle.length && layers.every((l, i) => l === middle[i])) {
+    const [slice, same] = SLICE_OF[turn.face];
+    return slice + prime(same ? turn.cw : !turn.cw);
+  }
+  const contiguousFromOuter = layers.every((l, i) => l === i);
+  if (contiguousFromOuter) {
+    const depth = layers.length;
+    return (depth === 1 ? turn.face : `${depth === 2 ? '' : depth}${turn.face}w`) + prime(turn.cw);
+  }
+  if (layers.length === 1) return `${layers[0] + 1}${turn.face}${prime(turn.cw)}`;
+  // Wide from the opposite side: describe it from that face
+  const mirrored = layers.map(l => N - 1 - l).sort((a, b) => a - b);
+  if (mirrored.every((l, i) => l === i)) {
+    return turnToNotation({ face: OPPOSITE_FACE[turn.face], layers: mirrored, cw: !turn.cw }, N);
+  }
+  // Anything else: one token per layer (they commute, so the result is the same)
+  return layers.map(l => turnToNotation({ ...turn, layers: [l] }, N)).join(' ');
+}
+
+/** Apply one quarter turn (all of its layers) */
+export function applyTurn(state, turn) {
+  return turn.layers.reduce((s, layer) => applyMove(s, turn.face, layer, turn.cw), state);
+}
+
+/** Parse and apply a move sequence string, e.g. "R U R' U'" */
+export function applyMoveSequence(state, sequence, options) {
+  const N = state[0].length;
+  return parseMoveSequence(sequence, N, options).reduce(applyTurn, state);
+}
+
+/** Apply a single token, including half turns ("F2", "Rw'", "x") */
+export function applyNotation(state, token, options) {
+  const parsed = parseToken(token, state[0].length, options);
+  return expandToken(parsed).reduce(applyTurn, state);
 }
 
 /**
@@ -223,166 +338,37 @@ export function isSolved(state) {
   return state.every(face => face.every(row => row.every(c => c === face[0][0])));
 }
 
-/**
- * Get the permutation representation of a state (relative to solved).
- * Returns an array P where P[i] = j means sticker at position i came from position j.
- * Sticker index: face * N*N + row * N + col
- */
-export function getPermutation(state) {
-  const N = state[0].length;
-  const P = [];
-  for (let f = 0; f < 6; f++) {
-    for (let r = 0; r < N; r++) {
-      for (let c = 0; c < N; c++) {
-        const color = state[f][r][c];
-        // Find where this color could have come from in solved state
-        // For display purposes, just record the color (face) at each position
-        P.push(color);
-      }
-    }
-  }
-  return P;
-}
+// Random-move scrambles in the style of WCA scramblers
+const SCRAMBLE_SPEC = {
+  2: { length: 11, moves: ['R', 'U', 'F'] },
+  3: { length: 25, moves: ['R', 'U', 'F', 'D', 'L', 'B'] },
+  4: { length: 40, moves: ['R', 'U', 'F', 'D', 'L', 'B', 'Rw', 'Uw', 'Fw'] },
+  5: { length: 60, moves: ['R', 'U', 'F', 'D', 'L', 'B', 'Rw', 'Uw', 'Fw', 'Dw', 'Lw', 'Bw'] },
+};
+const MOVE_AXIS = { R: 'x', L: 'x', U: 'y', D: 'y', F: 'z', B: 'z' };
 
 /**
- * Compute cycle notation of permutation P.
- * P[i] = color at sticker position i.
- * We infer cycles by comparing to solved state (where P[i] = floor(i/(N*N))).
+ * Generate a random-move scramble for an N×N cube.  Never turns the same
+ * face (or wide face) twice in a row, and never the same axis three times in
+ * a row (R L R), so no move is wasted.
  */
-export function computeCycles(state) {
-  const N = state[0].length;
-  const nn = N * N;
-  const total = 6 * nn;
-  const visited = new Uint8Array(total);
-  const cycles = [];
-
-  // Build: position i currently holds the sticker that "should" be at some solved position
-  // For group-theory display, we show the permutation on the face-sticker positions
-  // We use: solved[i] = face = floor(i/nn)
-  // current[i] = state[f][r][c] for the i-th position
-
-  // To get the permutation as a function π where π(i) = j means sticker at solved[j] is now at i:
-  // solved state: position i has color floor(i/nn)
-  // current state: position i has color state[f][r][c]
-  // We need: π(i) = the position in the solved state where the sticker now at position i came from
-  // Since center stickers are fixed, we only display permutation on non-center stickers
-
-  for (let start = 0; start < total; start++) {
-    if (visited[start]) continue;
-    const f = Math.floor(start / nn);
-    const r = Math.floor((start % nn) / N);
-    const c = start % N;
-    const color = state[f][r][c];
-    if (color === f) { visited[start] = 1; continue; } // fixed point, skip
-
-    // Follow cycle
-    visited[start] = 1;
-    // This is a simplified cycle display: we just show which positions swap colors
-    // Full permutation tracking would require sticker identity tracking, not just color
-    cycles.push([start]);
-  }
-  return cycles;
-}
-
-/**
- * Compute order of a move sequence (smallest k>0 such that seq^k = identity)
- * Returns integer (capped at 1260 for NxN cubes)
- */
-export function computeOrder(state, moveSeq) {
-  const N = state[0].length;
-  let s = state;
-  const base = JSON.stringify(state);
-  for (let k = 1; k <= 1260; k++) {
-    s = applyMoveSequence(s, moveSeq);
-    if (JSON.stringify(s) === base) return k;
-  }
-  return -1;
-}
-
-/**
- * Generate a random scramble of `moves` moves for NxN cube
- */
-export function randomScramble(N = 3, moves = 20) {
-  const faces = ['U', 'D', 'R', 'L', 'F', 'B'];
-  const suffixes = ["", "'", '2'];
+export function randomScramble(N = 3, length) {
+  const spec = SCRAMBLE_SPEC[N] ?? SCRAMBLE_SPEC[5];
+  const count = length ?? spec.length;
+  const suffixes = ['', "'", '2'];
   const result = [];
-  let lastFace = '';
-  for (let i = 0; i < moves; i++) {
-    let face;
-    do { face = faces[Math.floor(Math.random() * faces.length)]; } while (face === lastFace);
-    lastFace = face;
-    const layer = N > 3 ? (Math.random() < 0.3 ? 1 : 0) : 0;
-    const layerPrefix = layer > 0 ? `${layer + 1}` : '';
-    const suffix = suffixes[Math.floor(Math.random() * suffixes.length)];
-    result.push(`${layerPrefix}${face}${suffix}`);
+  let prev = null, prevPrev = null; // [face, axis] of the last two moves
+  while (result.length < count) {
+    const move = spec.moves[Math.floor(Math.random() * spec.moves.length)];
+    const face = move[0];
+    const axis = MOVE_AXIS[face];
+    if (prev && prev[0] === face) continue;
+    if (prev && prevPrev && prev[1] === axis && prevPrev[1] === axis) continue;
+    result.push(move + suffixes[Math.floor(Math.random() * 3)]);
+    prevPrev = prev;
+    prev = [face, axis];
   }
   return result.join(' ');
-}
-
-/**
- * Convert sticker index to human-readable label
- */
-export function stickerLabel(idx, N) {
-  const nn = N * N;
-  const f = Math.floor(idx / nn);
-  const rem = idx % nn;
-  const r = Math.floor(rem / N);
-  const c = rem % N;
-  return `${FACE_NAMES[f]}[${r}][${c}]`;
-}
-
-/**
- * Compute the permutation as a function: given solved state as reference,
- * return array perm where perm[i] = j means the sticker now at position i
- * originally came from position j in the solved state.
- *
- * For this to work we need color+multiplicity tracking (e.g., for centers of same color).
- * Here we use a greedy matching. Works correctly for 3x3 (all stickers unique by position).
- */
-export function truePermutation(state) {
-  const N = state[0].length;
-  const nn = N * N;
-  const total = 6 * nn;
-  const solved = solvedState(N);
-
-  // For each position i, find where the sticker came from
-  // We need to track sticker identity. For display, we approximate by color matching.
-  // For centers (and for NxN where many stickers share a color), this is approximate.
-  // For exact group theory, use sticker IDs.
-
-  // Build color→positions mapping in solved state
-  const colorPositions = {};
-  for (let i = 0; i < total; i++) {
-    const f = Math.floor(i / nn);
-    const r = Math.floor((i % nn) / N);
-    const c = i % N;
-    const color = solved[f][r][c];
-    if (!colorPositions[color]) colorPositions[color] = [];
-    colorPositions[color].push(i);
-  }
-
-  const usedSolvedPositions = new Set();
-  const perm = new Array(total);
-
-  for (let i = 0; i < total; i++) {
-    const f = Math.floor(i / nn);
-    const r = Math.floor((i % nn) / N);
-    const c = i % N;
-    const color = state[f][r][c];
-    // Find the closest unused solved position with this color
-    const candidates = colorPositions[color];
-    // Greedy: pick closest unused
-    let best = -1, bestDist = Infinity;
-    for (const j of candidates) {
-      if (!usedSolvedPositions.has(j)) {
-        const dist = Math.abs(i - j);
-        if (dist < bestDist) { bestDist = dist; best = j; }
-      }
-    }
-    perm[i] = best;
-    if (best !== -1) usedSolvedPositions.add(best);
-  }
-  return perm;
 }
 
 /**
@@ -481,35 +467,32 @@ export function formatCycles(cycles, N) {
   return cycles.map(cyc => `(${cyc.map(label).join(' ')})`).join('');
 }
 
+/** 4-cycles of sticker positions moved by one quarter turn (all its layers) */
+export function getTurnPositionCycles(turn, N) {
+  return turn.layers.flatMap(layer => getMovePositionCycles(turn.face, layer, turn.cw, N));
+}
+
 /**
- * Compute cumulative permutation from a sequence of move notations applied to solved state.
- * Returns {perm, cycles, parity, order (approx)}
+ * Compute the cumulative permutation of a list of quarter turns, starting
+ * from the identity.  Returns {perm, cycles, parity}.
  */
-export function analyzeSequence(notations, N) {
+export function analyzeSequence(turns, N) {
   const nn = N * N;
   const total = 6 * nn;
 
-  // Build permutation by tracking sticker IDs
-  // Initial: identity permutation
+  // perm[i] = where the sticker now at position i started
   let perm = Array.from({ length: total }, (_, i) => i);
 
-  for (const notation of notations) {
-    const mv = parseMove(notation);
-    if (!mv) continue;
-    const moveCycles = getMovePositionCycles(mv.face, mv.layer, mv.cw, N);
-    const times = mv.double ? 2 : 1;
-    for (let t = 0; t < times; t++) {
-      const newPerm = [...perm];
-      moveCycles.forEach(([a, b, c, d]) => {
-        // a→b means sticker at position a goes to position b
-        // So: newPerm[b] = old perm[a], etc.
-        newPerm[b] = perm[a];
-        newPerm[c] = perm[b];
-        newPerm[d] = perm[c];
-        newPerm[a] = perm[d];
-      });
-      perm = newPerm;
-    }
+  for (const turn of turns) {
+    const newPerm = [...perm];
+    // a→b means the sticker at position a goes to position b
+    getTurnPositionCycles(turn, N).forEach(([a, b, c, d]) => {
+      newPerm[b] = perm[a];
+      newPerm[c] = perm[b];
+      newPerm[d] = perm[c];
+      newPerm[a] = perm[d];
+    });
+    perm = newPerm;
   }
 
   // Decompose into cycles

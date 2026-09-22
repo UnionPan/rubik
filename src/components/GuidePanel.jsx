@@ -178,6 +178,10 @@ function PageGenerators() {
           solved state (the center) through edges represents a move sequence. The diameter of this
           graph is 20 — the maximum number of edges you ever need.
         </p>
+        <p className="gc-body">
+          The <strong>facelet graph</strong> beside the cube is its small cousin: one node per
+          sticker slot instead of per state. See the <strong>Graph Theory</strong> tab.
+        </p>
         <CayleyMiniViz />
       </div>
     </div>
@@ -379,46 +383,50 @@ function PageParity() {
       </p>
 
       <div className="gc-card">
-        <div className="gc-card-title">Even permutations only</div>
+        <div className="gc-card-title">Parity: the hidden constraint</div>
         <p className="gc-body">
           Any permutation can be decomposed into 2-swaps (transpositions). If the total number of
           swaps is even → <span style={{color:'#6ee7b7'}}>even permutation</span>; odd number →
           <span style={{color:'#f87171'}}> odd permutation</span>. A k-cycle requires k−1 transpositions.
         </p>
         <p className="gc-body">
-          Every face turn (a product of 4-cycles) uses 3 transpositions per 4-cycle. With 7 such
-          4-cycles per turn, that's 21 transpositions — an <em>odd</em> number. Wait — but corner
-          3-cycles (from applying the commutator) are even. The key fact:
+          A face turn of the 3×3 moves stickers in five 4-cycles (two on the turning face, three
+          around its belt). Each 4-cycle is 3 transpositions, so a turn is 15: <em>odd</em> on the
+          stickers. The constraint that matters lives on the <em>pieces</em>: a quarter turn is one
+          4-cycle of corners and one 4-cycle of edges, so it flips both parities at once.
         </p>
         <div className="gc-formula">
-          All legal cube positions have even total permutation parity.
+          sign(corner permutation) = sign(edge permutation)
         </div>
         <p className="gc-body">
           Consequence: you <strong>cannot</strong> swap just two corners or just two edges without
-          also disturbing something else. This is why "one corner twisted" or "two pieces swapped"
-          is physically impossible without disassembly.
+          also disturbing something else. Together with the orientation rules (corner twists sum to
+          0 mod 3, edge flips to 0 mod 2), this is why "one corner twisted" or "two pieces swapped"
+          is impossible without disassembly.
         </p>
       </div>
 
       <div className="gc-card">
         <div className="gc-card-title">Why 4×4 has parity cases</div>
         <p className="gc-body">
-          The 4×4 cube has <em>indistinguishable edge pairs</em> (dedges). During reduction you can
-          accidentally pair them in an "odd" configuration — legal for the 4×4 group but impossible
-          in the 3×3 group. The result looks like a single edge flip or a pair swap, requiring a
-          special "parity algorithm" to fix. This is a quotient group phenomenon:
+          An outer turn moves the 24 wing edges in two 4-cycles (<em>even</em>); an inner slice
+          turn moves them in one 4-cycle (<em>odd</em>). So the wings' parity is set by the inner
+          slices alone and is independent of the corners:
         </p>
-        <div className="gc-formula">G₄₄ / G₃₃ ≅ ℤ₂ × ℤ₂  (OLL parity × PLL parity)</div>
+        <div className="gc-formula">sign(wing permutation) = (−1)^(number of inner-slice quarter turns)</div>
         <p className="gc-body">
-          The 5×5 has the same issue for its inner edge pairs. Larger cubes keep introducing new
-          parity subgroups for each new pair of indistinguishable pieces.
+          An odd wing permutation shows up after reduction as <em>OLL parity</em>: a single flipped
+          edge, which no 3×3 algorithm can fix. <em>PLL parity</em> (two swapped edges) breaks the
+          other 3×3 rule, edge parity = corner parity; it is possible because identical-looking
+          center pieces can hide an odd permutation. The Pattern Detector in the Algorithms tab
+          checks both rules. The 5×5's wings follow the same rule.
         </p>
       </div>
 
       <div className="gc-callout">
         <span className="gc-callout-icon">→</span>
-        Go to the <strong>Group Theory</strong> tab and apply moves. The parity chip updates live —
-        notice it's always <em>Even</em> for legal states.
+        Go to the <strong>Graph Theory</strong> tab and apply moves. The parity of each orbit
+        updates live; on a 4×4, watch the wings flip only when you turn an inner slice.
       </div>
     </div>
   );

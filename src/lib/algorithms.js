@@ -109,7 +109,7 @@ export const ALGORITHMS = [
     id: 'oll_h',
     name: 'H-case (OLL 21)',
     category: 'OLL',
-    cubeSize: [3, 4, 5],
+    cubeSize: [2, 3, 4, 5],
     notation: "R U2 R' U' R U R' U' R U' R'",
     description:
       'OLL #21. All edges oriented, 2 diagonal corners twisted. One of the 7 cross OLL cases.',
@@ -122,7 +122,7 @@ export const ALGORITHMS = [
     id: 'oll_pi',
     name: 'Pi-case (OLL 22)',
     category: 'OLL',
-    cubeSize: [3, 4, 5],
+    cubeSize: [2, 3, 4, 5],
     notation: "R U2 R2 U' R2 U' R2 U2 R",
     description:
       'OLL #22. All edges oriented, 4 corners twisted (looks like the letter π). Symmetric case.',
@@ -135,7 +135,7 @@ export const ALGORITHMS = [
     id: 'oll_sune',
     name: 'Sune',
     category: 'OLL',
-    cubeSize: [3, 4, 5],
+    cubeSize: [2, 3, 4, 5],
     notation: "R U R' U R U2 R'",
     description:
       'OLL #27. Orients 3 corners of the last layer. One of the most important last-layer algorithms.',
@@ -148,7 +148,7 @@ export const ALGORITHMS = [
     id: 'oll_antisune',
     name: 'Anti-Sune',
     category: 'OLL',
-    cubeSize: [3, 4, 5],
+    cubeSize: [2, 3, 4, 5],
     notation: "R U2 R' U' R U' R'",
     description: 'OLL #26. Inverse orientation of Sune. Orients 3 corners in the opposite cycle.',
     groupTheoryNote: "Anti-Sune is the inverse of Sune in the Rubik group.",
@@ -159,7 +159,7 @@ export const ALGORITHMS = [
     id: 'oll_t',
     name: 'OLL T-Shape',
     category: 'OLL',
-    cubeSize: [3, 4, 5],
+    cubeSize: [2, 3, 4, 5],
     notation: "F R U R' U' F'",
     description: 'OLL #45. Orients edges in a T-pattern. The "inverse" of the standard edge flip.',
     groupTheoryNote:
@@ -172,7 +172,7 @@ export const ALGORITHMS = [
     id: 'oll_37',
     name: 'OLL 37 (Hockey Stick)',
     category: 'OLL',
-    cubeSize: [3, 4, 5],
+    cubeSize: [2, 3, 4, 5],
     notation: "F R U' R' U' R U R' F'",
     description:
       'OLL #37. Two adjacent edges oriented (L-shape), one corner twisted. Looks like a hockey stick on the U face.',
@@ -185,7 +185,7 @@ export const ALGORITHMS = [
     id: 'oll_33',
     name: 'OLL 33 (P shape)',
     category: 'OLL',
-    cubeSize: [3, 4, 5],
+    cubeSize: [2, 3, 4, 5],
     notation: "R U R' U' R' F R F'",
     description:
       'OLL #33. Two adjacent edges oriented. Extremely common in practice; often used as a sub-case.',
@@ -199,7 +199,7 @@ export const ALGORITHMS = [
     id: 'oll_44',
     name: 'OLL 44 (Line L)',
     category: 'OLL',
-    cubeSize: [3, 4, 5],
+    cubeSize: [2, 3, 4, 5],
     notation: "F U R U' R' F'",
     description:
       'OLL #44. Two opposite edges oriented (line), with specific corner orientations. One of the shortest OLL algorithms.',
@@ -225,7 +225,7 @@ export const ALGORITHMS = [
     id: 'pll_t',
     name: 'T-Perm',
     category: 'PLL',
-    cubeSize: [3, 4, 5],
+    cubeSize: [2, 3, 4, 5],
     notation: "R U R' U' R' F R2 U' R' U' R U R' F'",
     description:
       'PLL T-permutation. Swaps two adjacent corners and two adjacent edges on the last layer.',
@@ -261,7 +261,7 @@ export const ALGORITHMS = [
     id: 'pll_y',
     name: 'Y-Perm',
     category: 'PLL',
-    cubeSize: [3, 4, 5],
+    cubeSize: [2, 3, 4, 5],
     notation: "F R U' R' U' R U R' F' R U R' U' R' F R F'",
     description:
       'Swaps two diagonal corners and two adjacent edges. One of the only PLL algorithms involving diagonal swaps.',
@@ -275,7 +275,7 @@ export const ALGORITHMS = [
     id: 'pll_j_a',
     name: 'J-Perm A',
     category: 'PLL',
-    cubeSize: [3, 4, 5],
+    cubeSize: [2, 3, 4, 5],
     notation: "R' U L' U2 R U' R' U2 R L",
     description:
       'Swaps two adjacent corners and two adjacent edges (in different positions from T-perm). One of the J-perm variants.',
@@ -288,7 +288,7 @@ export const ALGORITHMS = [
     id: 'pll_r_a',
     name: 'R-Perm A (3-corner cycle)',
     category: 'PLL',
-    cubeSize: [3, 4, 5],
+    cubeSize: [2, 3, 4, 5],
     notation: "R U' R' U' R U R D R' U' R D' R' U2 R'",
     description:
       'Cycles three corners clockwise while permuting adjacent edges. One of the most asymmetric PLLs.',
@@ -301,7 +301,7 @@ export const ALGORITHMS = [
     id: 'pll_aa',
     name: 'A-Perm CW (3-corner cycle)',
     category: 'PLL',
-    cubeSize: [3, 4, 5],
+    cubeSize: [2, 3, 4, 5],
     notation: "R' F R' B2 R F' R' B2 R2",
     description:
       'Cycles three corners clockwise on the last layer with no edge movement.',
@@ -314,7 +314,7 @@ export const ALGORITHMS = [
     id: 'pll_ab',
     name: 'A-Perm CCW (inverse 3-corner cycle)',
     category: 'PLL',
-    cubeSize: [3, 4, 5],
+    cubeSize: [2, 3, 4, 5],
     notation: "R2 B2 R F R' B2 R F' R",
     description:
       'Inverse of A-Perm CW. Cycles three corners counter-clockwise.',
@@ -327,41 +327,41 @@ export const ALGORITHMS = [
   // ─── BIG CUBE ─────────────────────────────────────────────────────────────
   {
     id: 'edge_flip',
-    name: 'OLL Parity (4x4/5x5)',
+    name: 'OLL Parity (edge flip)',
     category: 'Big Cube',
     cubeSize: [4, 5],
-    notation: "Rw U2 x Rw U2 Rw U2 Rw' U2 Lw U2 Rw' U2 Rw U2 Rw' U2 Rw'",
+    notation: "2R2 B2 U2 2L U2 2R' U2 2R U2 F2 2R F2 2L' B2 2R2",
     description:
-      'Fixes OLL parity on 4x4: a single edge piece oriented incorrectly — impossible on 3x3.',
+      'Flips the UF edge pair in place: fixes OLL parity on the 4×4 (one flipped edge after reduction) and the last-edge flip while pairing a 5×5. 2R and 2L are single inner slices.',
     groupTheoryNote:
-      'On a 4x4 cube, the parity group is ℤ₂ × ℤ₂ (OLL parity × PLL parity). A single edge flip corresponds to a generator of the ℤ₂ OLL parity subgroup, invisible on 3x3.',
-    algebraNote: 'Parity subgroup: ℤ₂ × ℤ₂',
+      'An outer quarter turn moves the wings in two 4-cycles (even); an inner slice quarter turn moves them in one 4-cycle (odd). A single flipped edge means the wing permutation is odd, so no sequence of outer turns can fix it. This algorithm uses 9 inner-slice quarter turns, an odd number.',
+    algebraNote: 'sign on the wings = (−1)⁹ = −1',
     order: 2,
   },
   {
     id: 'pll_parity',
-    name: 'PLL Parity (4x4/5x5)',
+    name: 'PLL Parity (edge swap)',
     category: 'Big Cube',
-    cubeSize: [4, 5],
+    cubeSize: [4],
     notation: "2R2 U2 2R2 Uw2 2R2 Uw2",
     description:
-      'Fixes PLL parity on 4x4: a single edge swap — again impossible on 3x3 by the even-permutation constraint.',
+      'Swaps two edge pairs on the top layer (followed by U2): fixes PLL parity on the 4×4, where the last layer cannot be solved by any 3×3 PLL.',
     groupTheoryNote:
-      'PLL parity arises because the 4x4 cube group is larger than the 3x3 group: the group quotient includes ℤ₂ parity subgroups for inner-layer edge pairs.',
-    algebraNote: 'Parity group element',
+      'On a 3×3 the corner and edge permutations always have the same parity. After reducing a 4×4, the edge pairs can have the opposite parity to the corners, because identical-looking center pieces can hide an odd permutation. A 3×3 PLL cannot fix that; this algorithm changes the edge-pair parity while leaving the corners alone.',
+    algebraNote: 'sign(edges) ≠ sign(corners) → fix with a hidden center swap',
     order: 2,
   },
   {
     id: 'dedge_cycle',
-    name: '3-Edge Dedge Cycle',
+    name: 'Edge Pairing (slice–flip–slice)',
     category: 'Big Cube',
     cubeSize: [4, 5],
     notation: "Uw R U R' Uw'",
     description:
-      'Cycles three dedge (double-edge) pairs during the reduction phase of 4x4/5x5 solving.',
+      'The basic edge-pairing move: Uw lines up two matching wings, R U R\' swaps the new pair out for an unpaired edge, and Uw\' restores the centers.',
     groupTheoryNote:
-      'This is a conjugate: Uw · [R, U] · Uw⁻¹, localizing the commutator\'s effect to the upper layers.',
-    algebraNote: 'Conjugate: Uw · [R,U] · Uw⁻¹',
+      'A conjugate: Uw · (R U R\') · Uw⁻¹. The setup Uw moves the inner slice so R U R\' acts on a different set of wings; undoing the setup keeps the centers solved.',
+    algebraNote: 'Conjugate: Uw · (R U R\') · Uw⁻¹',
     order: null,
   },
 
@@ -370,7 +370,7 @@ export const ALGORITHMS = [
     id: 'checkerboard',
     name: 'Checkerboard',
     category: 'Patterns',
-    cubeSize: [2, 3, 4, 5],
+    cubeSize: [3, 4, 5],
     notation: "M2 E2 S2",
     description:
       'Creates a checkerboard pattern on all 6 faces. Each center color swaps with its opposite.',
@@ -461,6 +461,15 @@ export const ALGORITHMS = [
 ];
 
 /** Get algorithms applicable to a given cube size */
+/**
+ * 3×3 algorithms are written in 3×3 notation; on a big cube they run through
+ * the reduction map (outer layers stay outer, the 3×3 middle slice becomes all
+ * inner slices).  Big-cube algorithms use native N×N notation (Rw = 2 layers).
+ */
+export function usesReducedNotation(alg) {
+  return alg.category !== 'Big Cube';
+}
+
 export function getAlgorithmsForSize(N) {
   return ALGORITHMS.filter(a => a.cubeSize.includes(N));
 }
