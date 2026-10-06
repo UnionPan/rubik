@@ -1,16 +1,17 @@
 # Rubik.Group
 
-An interactive Rubik's Cube (2×2 to 5×5) for learning the group theory and graph theory behind it.
-Turn the 3D cube and watch the same move animate in lockstep on a colored graph of its facelets, trace the permutation it builds, and let the pattern detector and solver guide you to a solve.
+Interactive twisty puzzles for learning the group theory and graph theory behind them: Rubik's cubes from 2×2 to 5×5, the Ivy Cube and the Skewb Diamond.
+Turn a puzzle in 3D and watch the same move animate in lockstep on a colored graph of its stickers, trace the permutation it builds, and let the pattern detector and solver guide you to a solve.
 
 ## Features
 
-- **3D cube, 2×2 to 5×5.** Turn layers with the buttons, the keyboard, notation, or by dragging a sticker.
+- **Six puzzles.** Cubes from 2×2 to 5×5, the Ivy Cube (corner-turning, leaf-shaped centers) and the Skewb Diamond (an octahedron with the Skewb mechanism). Turn them with buttons, the keyboard, notation, or by dragging a sticker.
 - **Facelet graph.** Every facelet is a vertex; a layer turn is a rigid rotation of a sphere, so facelets travel along circles, drawn as three families of loops (one per axis). The graph animates in lockstep with the cube from a shared clock.
 - **Group Theory tab.** The exact sticker permutation of the current position (tracked through every turn), its cycle structure and parity, and a move-by-move trace.
 - **Graph Theory tab.** The facelet graph as the Schreier graph of the cube group: its connected components are the orbits of the group, each of exactly 24 vertices, and the parity of every orbit is predicted by per-move sign characters.
 - **Algorithms tab with a pattern detector.** Detects the solve stage on every size (layer-by-layer on the 2×2, CFOP on the 3×3, reduction on the 4×4 and 5×5), matches the library algorithm that applies, tells you the setup turn, and explains OLL/PLL parity as broken 3×3 invariants.
-- **Solve tab.** Kociemba's two-phase algorithm, implemented from scratch, solving from the cube's state: directly on the 3×3, via a virtual 3×3 on the 2×2, and after reduction (with automatic parity fixes) on the 4×4 and 5×5.
+- **Solve tab.** Kociemba's two-phase algorithm, implemented from scratch, solving from the cube's state: directly on the 3×3, via a virtual 3×3 on the 2×2, and after reduction (with automatic parity fixes) on the 4×4 and 5×5. The Ivy Cube and Skewb Diamond are small enough to enumerate completely, so their solutions are optimal and the site shows their true God's numbers (8 and 10).
+- **Less text by default.** Every section shows its numbers and pictures; the explanations sit behind a "Why?" toggle, and the Explain switch opens them all at once.
 - **Shareable links.** The URL always encodes the cube size, scramble and every move; the Share button copies it.
 - **Accessibility.** Keyboard turning, touch gestures, resizable panes, and instant turns when the system asks for reduced motion.
 
@@ -26,9 +27,12 @@ Typed moves and algorithms use WCA / SiGN notation.
 | `M E S` | Middle slice: the central layer on odd cubes, all inner layers on even cubes |
 | `x y z` | Whole-cube rotation, following R, U, F |
 
+The Ivy Cube and Skewb Diamond turn about four axes through the corners URF, ULB, DLF and DRB, named `F`, `U`, `L` and `R`; each turn is 120°, and `'` turns the other way.
+
 3×3 algorithms run on big cubes through the reduction map: outer layers stay outer, and the 3×3 middle slice becomes all inner slices.
 
 Keyboard: `R U F D L B` turn a face, `Shift` makes it counter-clockwise, `Alt`/`Option` makes it wide, `M E S` turn slices and `X Y Z` rotate the cube.
+On the Ivy Cube and Skewb Diamond, `F U L R` turn about the four axes.
 
 ## Development
 
@@ -48,20 +52,37 @@ npm run build      # production build in dist/
 src/
   App.jsx                    layout, move pipeline, keyboard, share links
   components/
-    CubeViewer3D.jsx         three.js cube, turn animation, drag-to-turn
-    FaceletGraph.jsx         the synchronized facelet graph (SVG)
-    GraphTheoryPanel.jsx     orbits, parity characters, Schreier vs Cayley graphs
-    AlgebraPanel.jsx         exact permutation stats and move trace
-    AlgorithmPanel.jsx       algorithm stepper and pattern detector
-    SolverPanel.jsx          two-phase solver UI and reduction guide
+    ui/Section.jsx           the panel building block: title, caption, "Why?" toggle
+    three/stage.js           shared three.js stage: camera orbit, render loop, gestures
+    CubeViewer3D.jsx         the cubes in 3D, turn animation, drag-to-turn
+    PuzzleViewer3D.jsx       any geometry-engine puzzle in 3D
+    FaceletGraph.jsx         the synchronized sticker graph (SVG), for every puzzle
+    AlgebraPanel.jsx         Math › Groups: exact permutation stats and move trace
+    GraphTheoryPanel.jsx     Math › Graphs for cubes: orbits, parity characters
+    GenericGraphsPanel.jsx   Math › Graphs for other puzzles, with the full Cayley graph
+    AlgorithmPanel.jsx       algorithm library with a stepper, and the pattern detector
+    SolverPanel.jsx          two-phase solver UI and reduction guide (cubes)
+    GenericSolvePanel.jsx    optimal solver (other puzzles)
   lib/
-    cubeState.js             state, moves, notation parser, scrambles
-    faceletGraph.js          sphere layout, orbits, sign characters
-    patternRecognition.js    stage detection, reduction, parity invariants
+    cubeState.js             cube state, moves, notation parser, scrambles
+    faceletGraph.js          sphere layout, projection, orbits, sign characters
+    patternRecognition.js    cube stage detection, reduction, parity invariants
     twophase.js              Kociemba's two-phase algorithm
     solveInput.js            any N×N state → solvable 3×3 (+ parity fix)
+    puzzles/                 the geometry engine
+      engine.js              moves, enumeration, optimal solver, graph model, from geometry alone
+      ivy.js, diamond.js     puzzle definitions: sticker outlines, axes, cuts
+      models.js              one interface over cubes and engine puzzles
+      detect.js, library.js  stage detector and verified-optimal algorithms
+      puzzle.worker.js       enumerates every position off the main thread
     share.js                 URL fragment encoding
     __tests__/               Vitest suites for all of the above
+
+### Adding a puzzle
+
+A puzzle is a geometry definition (see `src/lib/puzzles/ivy.js`): sticker outlines with a home color and a reference point, turning axes, and a rule for which stickers a turn carries.
+The engine derives the move permutations by rotating the reference points, and from those everything else: notation, enumeration, the optimal solver, the graph and its orbits.
+Register it in `puzzles/index.js` and `puzzles/models.js`; the tests in `puzzles.test.js` check that every turn maps stickers onto stickers and that the group has the expected size.
 ```
 
 ## Deployment

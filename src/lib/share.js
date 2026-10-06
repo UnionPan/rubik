@@ -1,13 +1,11 @@
 /**
- * Shareable links: the cube size, scramble and every move since, in the URL
- * fragment, e.g.  #n=4&s=R_U2_Fw'&m=R_U_R'
- * Moves are written in native notation (turnToNotation) so they replay to the
- * identical position, and the exact move path (for the permutation stats)
- * survives the round trip.
+ * Shareable links: the puzzle, scramble and every move since, in the URL
+ * fragment, e.g.  #n=4&s=R_U2_Fw'&m=R_U_R'  (cubes, by size)
+ *                 #p=ivy&s=F_U'_L&m=R      (other puzzles, by id)
+ * Moves are written as native notation (model.turnToNotation) so they replay
+ * to the identical position, and the exact move path survives the round trip.
  */
-import { parseMoveSequence, turnToNotation } from './cubeState';
-
-const SIZES = [2, 3, 4, 5];
+import { getModel, isPuzzleId } from './puzzles/models';
 
 const encodeSeq = (seq) => seq.trim().split(/\s+/).filter(Boolean)
   .map(tok => encodeURIComponent(tok).replace(/%27/g, "'"))
@@ -15,18 +13,18 @@ const encodeSeq = (seq) => seq.trim().split(/\s+/).filter(Boolean)
 const decodeSeq = (value) => decodeURIComponent(value.replace(/_/g, ' '));
 
 /** Fragment for a position, or '' for the pristine default (solved 3×3) */
-export function encodeShareHash({ N, scramble = '', moves = [] }) {
-  const m = moves.map(t => turnToNotation(t, N)).filter(Boolean).join(' ');
-  if (N === 3 && !scramble && !m) return '';
-  const parts = [`n=${N}`];
+export function encodeShareHash({ model, scramble = '', moves = [] }) {
+  const m = moves.map(t => model.turnToNotation(t)).filter(Boolean).join(' ');
+  if (model.id === 'cube3' && !scramble && !m) return '';
+  const parts = [model.kind === 'cube' ? `n=${model.N}` : `p=${model.id}`];
   if (scramble) parts.push(`s=${encodeSeq(scramble)}`);
   if (m) parts.push(`m=${encodeSeq(m)}`);
   return `#${parts.join('&')}`;
 }
 
 /**
- * Parse a fragment into { N, scramble, scrambleTurns, moves }, or null when
- * it is empty or invalid (an invalid link just opens the default cube).
+ * Parse a fragment into { puzzleId, scramble, scrambleTurns, moves }, or null
+ * when it is empty or invalid (an invalid link just opens the default cube).
  */
 export function decodeShareHash(hash) {
   const body = (hash || '').replace(/^#/, '');
@@ -36,13 +34,14 @@ export function decodeShareHash(hash) {
     const eq = pair.indexOf('=');
     if (eq > 0) params[pair.slice(0, eq)] = pair.slice(eq + 1);
   }
-  const N = Number(params.n);
-  if (!SIZES.includes(N)) return null;
+  const puzzleId = params.p ? params.p : params.n ? `cube${params.n}` : null;
+  if (!puzzleId || !isPuzzleId(puzzleId)) return null;
+  const model = getModel(puzzleId);
   try {
     const scramble = params.s ? decodeSeq(params.s) : '';
-    const scrambleTurns = scramble ? parseMoveSequence(scramble, N) : [];
-    const moves = params.m ? parseMoveSequence(decodeSeq(params.m), N) : [];
-    return { N, scramble, scrambleTurns, moves };
+    const scrambleTurns = scramble ? model.parseMoveSequence(scramble) : [];
+    const moves = params.m ? model.parseMoveSequence(decodeSeq(params.m)) : [];
+    return { puzzleId, scramble, scrambleTurns, moves };
   } catch {
     return null;
   }

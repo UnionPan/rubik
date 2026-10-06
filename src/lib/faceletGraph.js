@@ -16,7 +16,7 @@
  * hidden corner (an azimuthal projection, see `project`) turns those circles
  * into three families of nested loops, one family per axis.
  */
-import { FACE, FACE_NAMES, getMovePositionCycles } from './cubeState';
+import { FACE, FACE_NAMES, getMovePositionCycles, applyTurn } from './cubeState';
 
 // Axis index (0=x, 1=y, 2=z) and outward sign for each face
 const FACE_AXIS = {
@@ -111,10 +111,6 @@ export function inSlice(cubie, face, layer, N) {
 // Viewed from the URF corner (like the default 3D camera): the three visible
 // faces U, F, R form a curved hexagon in the middle and the three hidden
 // faces wrap around it.  The projection pole is the hidden DLB corner.
-const V = normalize([1, 1, 1]);
-const E_UP = normalize(sub([0, 1, 0], scale(V, dot([0, 1, 0], V))));
-const E_RIGHT = cross(E_UP, V);
-
 /**
  * Radial profile of the projection as a function of angular distance θ from
  * the view centre.  Pure stereographic projection (tan θ/2) maps circles to
@@ -127,16 +123,29 @@ function radialProfile(theta) {
   return theta / Math.PI;
 }
 
-/** Project a unit-sphere point to the plane (unit disc, y pointing down for SVG) */
-export function project(p) {
-  const c = Math.max(-1, Math.min(1, dot(p, V)));
-  const theta = Math.acos(c);
-  const px = dot(p, E_RIGHT), py = dot(p, E_UP);
-  const len = Math.hypot(px, py);
-  if (len < 1e-9) return [0, 0];
-  const R = radialProfile(theta);
-  return [(px / len) * R, -(py / len) * R];
+/**
+ * Azimuthal projection of the unit sphere seen from direction `view`, with
+ * +y pointing up on screen.  Returns p ↦ [x, y] in the unit disc (y down,
+ * for SVG).  The antipode of `view` is singular, so choose a view with no
+ * sticker exactly opposite it.
+ */
+export function makeProjection(view) {
+  const V = normalize(view);
+  const E_UP = normalize(sub([0, 1, 0], scale(V, dot([0, 1, 0], V))));
+  const E_RIGHT = cross(E_UP, V);
+  return (p) => {
+    const c = Math.max(-1, Math.min(1, dot(p, V)));
+    const theta = Math.acos(c);
+    const px = dot(p, E_RIGHT), py = dot(p, E_UP);
+    const len = Math.hypot(px, py);
+    if (len < 1e-9) return [0, 0];
+    const R = radialProfile(theta);
+    return [(px / len) * R, -(py / len) * R];
+  };
 }
+
+/** The cube's projection: seen from the URF corner, with the DLB corner as the pole */
+export const project = makeProjection([1, 1, 1]);
 
 // ── Orbits (connected components of the Schreier graph) ────────────────────
 
@@ -511,3 +520,31 @@ function cross(a, b) {
 }
 
 export { FACE };
+
+// ── Graph model: the interface FaceletGraph draws from ───────────────────────
+// The generic puzzle engine (lib/puzzles/engine.js) provides the same shape.
+
+const CUBE_COLORS = ['#FFFFFF', '#B71234', '#009B48', '#FFD500', '#FF5800', '#0046AD'];
+const modelCache = new Map();
+
+/** Facelet-graph model of the N×N cube */
+export function cubeGraphModel(N) {
+  if (modelCache.has(N)) return modelCache.get(N);
+  const g = buildFaceletGraph(N);
+  const model = {
+    ...g,
+    kind: 'cube',
+    colors: CUBE_COLORS,
+    labelsOnDots: N % 2 === 1,
+    nodes: g.nodes.map(n => ({ ...n, face: n.f })),
+    colorOf: (state, i) => { const n = g.nodes[i]; return state[n.f][n.r][n.c]; },
+    movingNodes: (t) => nodesInSlice(g, t.face, t.layers),
+    circleKeysFor: (t) => new Set(circlesForMove(g, t.face, t.layers).map(c => c.key)),
+    positionDuring: (i, t, frac) => nodePositionDuring(g, i, t.face, t.cw, frac),
+    applyTurn,
+    labelOf: (i) => { const n = g.nodes[i]; return `${FACE_NAMES[n.f]}[${n.r}][${n.c}]`; },
+    describeTurn: (t) => describeMove(g, t),
+  };
+  modelCache.set(N, model);
+  return model;
+}

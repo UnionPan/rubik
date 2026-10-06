@@ -1,6 +1,7 @@
 import { useState, useEffect, useRef, useCallback, useMemo } from 'react';
 import { parseMoveSequence, isSolved } from '../lib/cubeState';
 import { buildSolveInput } from '../lib/solveInput';
+import Section from './ui/Section';
 
 // ── Phase 2 move set: only these are allowed in H = <U, D, R2, L2, F2, B2> ──
 const PHASE2_SET = new Set(['U', "U'", 'U2', 'D', "D'", 'D2', 'R2', 'L2', 'F2', 'B2']);
@@ -95,70 +96,86 @@ export default function SolverPanel({
   const isBig = cubeSize > 3;
   const reduction = isBig ? REDUCTION_SIZES[cubeSize] : null;
 
+  const caption = cubeSize === 2 ? 'Kociemba two-phase, on the corners of a virtual 3×3.'
+    : isBig ? `Reduce the ${cubeSize}×${cubeSize} by hand; the solver finishes it.`
+    : 'Kociemba two-phase, from the current colors.';
+
   return (
-    <div className="solver-panel">
-      <h3 className="panel-title">
-        <span className="icon">★</span> Two-phase Solver
-        {cubeSize === 2 && <span className="solver-size-note"> — 2×2 corners on a virtual 3×3</span>}
-        {isBig && <span className="solver-size-note"> — {cubeSize}×{cubeSize} by reduction</span>}
-      </h3>
+    <div className="panel-stack">
+      <Section title="Solve" caption={caption} className="solver-panel">
 
-      {/* ── Big cube: reduction progress until the solver can take over ── */}
-      {isBig && (
-        <ReductionStatus input={input} pattern={detectedPattern} cubeSize={cubeSize} solved={cubeIsSolved} />
-      )}
+        {/* ── Big cube: reduction progress until the solver can take over ── */}
+        {isBig && (
+          <ReductionStatus input={input} pattern={detectedPattern} cubeSize={cubeSize} solved={cubeIsSolved} />
+        )}
 
-      {/* ── Worker status ── */}
-      <div className={`solver-status-bar ${workerReady ? 'ready' : 'loading'}`}>
-        {workerReady
-          ? <><span className="ssb-dot green"/>Solver ready</>
-          : <><span className="ssb-dot spin"/>Building the two-phase tables…</>}
-      </div>
+        {/* ── Worker status ── */}
+        <div className={`solver-status-bar ${workerReady ? 'ready' : 'loading'}`}>
+          {workerReady
+            ? <><span className="ssb-dot green"/>Solver ready</>
+            : <><span className="ssb-dot spin"/>Building the two-phase tables…</>}
+        </div>
 
-      {/* ── Solve button ── */}
-      <button
-        className={`solver-solve-btn ${solving ? 'solving' : ''}`}
-        onClick={handleSolve}
-        disabled={!workerReady || solving || animating || cubeIsSolved || !input.ok}
-        title={
-          !workerReady     ? 'Initializing…'
-          : cubeIsSolved   ? 'Cube is already solved'
-          : !input.ok      ? input.reason
-          : solving        ? 'Searching…'
-          : 'Run the two-phase solver'
-        }
-      >
-        {solving
-          ? <><span className="btn-spin">⏳</span> Solving…</>
-          : cubeIsSolved ? '✓ Already solved'
-          : isBig ? '★ Finish the reduced cube'
-          : '★ Find solution'}
-      </button>
+        {/* ── Solve button ── */}
+        <button
+          className={`solver-solve-btn ${solving ? 'solving' : ''}`}
+          onClick={handleSolve}
+          disabled={!workerReady || solving || animating || cubeIsSolved || !input.ok}
+          title={
+            !workerReady     ? 'Initializing…'
+            : cubeIsSolved   ? 'Cube is already solved'
+            : !input.ok      ? input.reason
+            : solving        ? 'Searching…'
+            : 'Run the two-phase solver'
+          }
+        >
+          {solving
+            ? <><span className="btn-spin">⏳</span> Solving…</>
+            : cubeIsSolved ? '✓ Already solved'
+            : isBig ? '★ Finish the reduced cube'
+            : '★ Find solution'}
+        </button>
 
-      {!input.ok && !cubeIsSolved && !isBig && <div className="solver-error">{input.reason}</div>}
-      {solveError && <div className="solver-error">{solveError}</div>}
+        {!input.ok && !cubeIsSolved && !isBig && <div className="solver-error">{input.reason}</div>}
+        {solveError && <div className="solver-error">{solveError}</div>}
 
-      {/* ── Solution result with phase visualisation ── */}
-      {solution && !solveError && (
-        <SolutionDisplay
-          solution={solution}
-          animating={animating}
-          onPlay={handlePlay}
-          cubeIsSolved={cubeIsSolved}
-        />
-      )}
+        {/* ── Solution result with phase visualisation ── */}
+        {solution && !solveError && (
+          <SolutionDisplay
+            solution={solution}
+            animating={animating}
+            onPlay={handlePlay}
+            cubeIsSolved={cubeIsSolved}
+          />
+        )}
+      </Section>
 
       {/* ── Big cube: the method ── */}
-      {reduction && <ReductionMethod info={reduction} cubeSize={cubeSize} />}
+      {reduction && (
+        <Section title="Reduction method" caption="Centers → edges → solve as a 3×3."
+          why={<p>{reduction.parityNote}</p>}>
+          {(open) => open && <ReductionMethod info={reduction} />}
+        </Section>
+      )}
 
-      {/* ── Algorithm diagram: the two-phase picture ── */}
-      <TwoPhaseSearchDiagram />
-
-      {/* ── H-subgroup visual ── */}
-      <HSubgroupDiagram />
-
-      {/* ── Coordinate space ── */}
-      <CoordinateSpaceDiagram />
+      {/* ── How the two-phase algorithm works ── */}
+      <Section
+        title="How it works"
+        caption="Reach the subgroup H = ⟨U, D, R2, L2, F2, B2⟩, then solve inside it."
+        why={<p>
+          Both phases are IDA* searches over small coordinates of the cube (corner twist, edge
+          flip, slice position; then permutations), guided by exact distance tables that are built
+          once when the page loads.
+        </p>}
+      >
+        {(open) => open && (
+          <div className="solver-diagrams">
+            <TwoPhaseSearchDiagram />
+            <HSubgroupDiagram />
+            <CoordinateSpaceDiagram />
+          </div>
+        )}
+      </Section>
     </div>
   );
 }
@@ -299,30 +316,27 @@ function SolutionDisplay({ solution, animating, onPlay, cubeIsSolved }) {
 function TwoPhaseSearchDiagram() {
   return (
     <div className="solver-diagram-card">
-      <div className="sdc-title">Two-Phase IDA* Search</div>
+      <div className="sdc-title">Two phases</div>
       <svg viewBox="0 0 360 220" className="sdc-svg" aria-label="Two-phase IDA* search diagram">
 
         {/* ── Axes ── */}
         {/* State space blob: full cube group */}
         <ellipse cx="180" cy="110" rx="168" ry="96"
           fill="none" stroke="#3a3228" strokeWidth="1.2"/>
-        <text x="8" y="18" fontSize="8.5" fill="#5a5040">Full cube group G</text>
-        <text x="8" y="29" fontSize="7" fill="#3a3228">≈ 4.3 × 10¹⁹ states</text>
+        <text x="10" y="18" fontSize="10" fill="#8a8070">G · 4.3 × 10¹⁹</text>
 
         {/* H subgroup blob */}
         <ellipse cx="265" cy="130" rx="82" ry="58"
           fill="rgba(0,75,173,0.08)" stroke="#0046AD" strokeWidth="1" strokeDasharray="4 3"/>
-        <text x="248" y="100" fontSize="7.5" fill="#0046AD" fontWeight="bold">H</text>
-        <text x="226" y="111" fontSize="6.5" fill="#0046AD">663,552 states</text>
-        <text x="229" y="122" fontSize="6" fill="#4060a0">U,D,R²,L²,F²,B²</text>
+        <text x="300" y="92" fontSize="10" fill="#60a5fa" fontWeight="bold">H · 1.95 × 10¹⁰</text>
 
         {/* Solved state dot */}
         <circle cx="280" cy="148" r="5" fill="#009B48"/>
-        <text x="288" y="151" fontSize="7" fill="#009B48" fontWeight="bold">solved</text>
+        <text x="288" y="152" fontSize="10" fill="#34d399" fontWeight="bold">solved</text>
 
         {/* Scrambled state dot */}
         <circle cx="62" cy="80" r="5" fill="#B71234"/>
-        <text x="70" y="77" fontSize="7" fill="#B71234" fontWeight="bold">scrambled</text>
+        <text x="30" y="98" fontSize="10" fill="#f87171" fontWeight="bold">scrambled</text>
 
         {/* Phase 1 arrow: scrambled → into H */}
         <defs>
@@ -341,22 +355,18 @@ function TwoPhaseSearchDiagram() {
           fill="none" stroke="#0046AD" strokeWidth="1.8" markerEnd="url(#arr2)"/>
 
         {/* Phase 1 label on path */}
-        <text x="105" y="55" fontSize="8" fill="#FF5800" fontWeight="bold">Phase 1</text>
-        <text x="101" y="65" fontSize="6.5" fill="#FF5800">IDA* on flip/twist/slice</text>
-        <text x="103" y="74" fontSize="6.5" fill="#FF5800">→ enters H in ≤12 moves</text>
+        <text x="100" y="52" fontSize="10" fill="#FF8C42" fontWeight="bold">Phase 1 · ≤ 12</text>
 
         {/* Phase 2 label on path */}
-        <text x="208" y="107" fontSize="8" fill="#0046AD" fontWeight="bold">Phase 2</text>
-        <text x="204" y="117" fontSize="6.5" fill="#0046AD">IDA* within H</text>
-        <text x="204" y="126" fontSize="6.5" fill="#0046AD">→ solved in ≤18 moves</text>
+        <text x="196" y="140" fontSize="10" fill="#60a5fa" fontWeight="bold">Phase 2 · ≤ 18</text>
 
         {/* H boundary dot (where phase 1 lands) */}
         <circle cx="192" cy="107" r="4" fill="#FFD500" stroke="#FF5800" strokeWidth="1"/>
-        <text x="178" y="100" fontSize="6.5" fill="#FFD500">entry to H</text>
+
       </svg>
       <div className="sdc-note">
-        Phase 1 reaches the subgroup H = &lt;U, D, R², L², F², B²&gt; using all 18 generators.
-        Phase 2 solves within H using only its 10 generators — guaranteeing ≤20 total moves.
+        Phase 1 reaches H = ⟨U, D, R2, L2, F2, B2⟩ in at most 12 moves; phase 2 finishes inside H
+        in at most 18. The solver keeps searching briefly for a shorter total, typically 21–23 moves.
       </div>
     </div>
   );
@@ -399,7 +409,7 @@ function HSubgroupDiagram() {
 
   return (
     <div className="solver-diagram-card">
-      <div className="sdc-title">Subgroup H — Phase 2 Generator Restrictions</div>
+      <div className="sdc-title">Phase 2 moves</div>
       <div className="hsg-layout">
         <svg viewBox={`0 0 ${W} ${H}`} className="hsg-svg"
           aria-label="Cube net showing Phase 2 move restrictions">
@@ -519,7 +529,7 @@ function CoordinateSpaceDiagram() {
 
   return (
     <div className="solver-diagram-card">
-      <div className="sdc-title">Kociemba Coordinate Spaces</div>
+      <div className="sdc-title">Coordinates</div>
       <div className="coord-section-label phase1-label">Phase 1 coordinates (product space: 2048 × 2187 × 495 ≈ 2.2 × 10⁹)</div>
       <div className="coord-rows">
         {coords.map(c => (
@@ -630,28 +640,17 @@ const REDUCTION_SIZES = {
   },
 };
 
-function ReductionMethod({ info, cubeSize }) {
+function ReductionMethod({ info }) {
   return (
     <div className="rdx-method">
-      <div className="solver-intro-card">
-        <div className="sic-title">The reduction method — {info.label}</div>
-        <p className="sic-body">
-          Kociemba's algorithm works on the 3×3 group. A {cubeSize}×{cubeSize} is first
-          <strong> reduced</strong>: solve the centers and pair the edges until it behaves like a
-          3×3, then solve that 3×3.
-        </p>
-        <p className="sic-body">
-          Group size: <span style={{color:'var(--orange)',fontFamily:'var(--mono)'}}>{info.groupSize}</span>
-          {' · '}{info.pieceCounts}
-        </p>
-      </div>
-
-      {/* Phase pipeline */}
+      <p className="rdx-facts">
+        <span className="math-mono">{info.groupSize}</span> · {info.pieceCounts}
+      </p>
       <div className="rdx-phases">
         {info.phases.map(ph => (
           <div key={ph.num} className="rdx-phase">
             <div className="rdx-phase-header">
-              <span className="rdx-phase-badge" style={{background: ph.col}}>Phase {ph.num}</span>
+              <span className="rdx-phase-badge" style={{background: ph.col}}>{ph.num}</span>
               <span className="rdx-phase-title">{ph.title}</span>
             </div>
             <p className="rdx-phase-desc">{ph.desc}</p>
@@ -661,12 +660,6 @@ function ReductionMethod({ info, cubeSize }) {
             </div>
           </div>
         ))}
-      </div>
-
-      {/* Parity note */}
-      <div className="rdx-parity">
-        <div className="rdx-parity-label">⚠ Parity</div>
-        <p className="rdx-parity-body">{info.parityNote}</p>
       </div>
     </div>
   );

@@ -1,8 +1,6 @@
 import { useState, useEffect, useCallback, useRef, useMemo } from 'react';
-import {
-  ALGORITHMS, ALGORITHM_CATEGORIES, getAlgorithmsForSize, tokenize, usesReducedNotation,
-} from '../lib/algorithms';
-import { applyTurn, parseToken, expandToken } from '../lib/cubeState';
+import { tokenize } from '../lib/algorithms';
+import Section from './ui/Section';
 
 /** The inverse of a quarter turn */
 function invertTurn(t) {
@@ -11,10 +9,11 @@ function invertTurn(t) {
 }
 
 /**
- * AlgorithmPanel
- * Mount with key={cubeSize}: algorithm tokens are resolved for one cube size.
+ * AlgorithmPanel - the algorithm library with a stepper, and the pattern detector.
+ * Mount with a key per puzzle: algorithm tokens are resolved for one puzzle.
  * Props:
- *   cubeSize: N
+ *   model: puzzle model (applyTurn)
+ *   library: getLibrary(model) - categories, algorithms, token resolution
  *   onAlgorithmSelect: fn(algorithm)
  *   onStepState: fn(state, turns) - state after the current step, and the
  *                quarter turns applied since the algorithm's entry state
@@ -24,9 +23,11 @@ function invertTurn(t) {
  *   onAnimateStep: fn(turn, onDone) - animates one quarter turn on cube and graph
  *   onApplySetup: fn(notation) - plays a setup sequence (e.g. "U'") on the cube
  *   onEntry: fn() - the stepper is about to start from the current state
+ *   detectorExtra: optional element shown inside the detector card
  */
 export default function AlgorithmPanel({
-  cubeSize = 3,
+  model,
+  library,
   onAlgorithmSelect,
   onStepState,
   baseState,
@@ -35,8 +36,9 @@ export default function AlgorithmPanel({
   onAnimateStep = null,
   onApplySetup = null,
   onEntry = null,
+  detectorExtra = null,
 }) {
-  const [selectedCategory, setSelectedCategory] = useState('Beginner');
+  const [selectedCategory, setSelectedCategory] = useState(library.defaultCategory);
   const [selectedAlg, setSelectedAlg] = useState(null);
   const [stepIndex, setStepIndex] = useState(-1); // -1 = not playing
   const [playing, setPlaying] = useState(false);
@@ -48,23 +50,19 @@ export default function AlgorithmPanel({
   // even after onStepState has updated the parent's state.
   const entryStateRef = useRef(baseState);
 
-  const algList = getAlgorithmsForSize(cubeSize).filter(
-    a => a.category === selectedCategory
-  );
+  const algList = library.list.filter(a => a.category === selectedCategory);
   const tokens = useMemo(
     () => (selectedAlg ? tokenize(selectedAlg.notation) : []),
     [selectedAlg],
   );
-  // Each token resolved to quarter turns for this cube size.  3×3 algorithms
-  // run on big cubes through the reduction map (see cubeState notation notes).
+  // Each token resolved to the turns it stands for on this puzzle
   const stepTurns = useMemo(() => {
     if (!selectedAlg) return [];
-    const reduced = usesReducedNotation(selectedAlg);
     return tokens.map(tok => {
-      try { return expandToken(parseToken(tok, cubeSize, { reduced })); }
+      try { return library.resolveToken(selectedAlg, tok); }
       catch { return []; }
     });
-  }, [selectedAlg, tokens, cubeSize]);
+  }, [selectedAlg, tokens, library]);
 
   const turnsUpTo = useCallback(
     (idx) => stepTurns.slice(0, idx + 1).flat(),
@@ -85,8 +83,8 @@ export default function AlgorithmPanel({
   const computeState = useCallback((idx) => {
     const entry = entryStateRef.current;
     if (!entry || idx < 0) return entry;
-    return turnsUpTo(idx).reduce(applyTurn, entry);
-  }, [turnsUpTo]);
+    return turnsUpTo(idx).reduce(model.applyTurn, entry);
+  }, [turnsUpTo, model]);
 
   // Before the first step, the algorithm starts from whatever the cube shows now
   // (the user may have made a setup turn since selecting it).
@@ -188,143 +186,151 @@ export default function AlgorithmPanel({
 
   // Jump to a specific algorithm by id (select it and scroll)
   const jumpToAlg = useCallback((algId) => {
-    const alg = ALGORITHMS.find(a => a.id === algId);
+    const alg = library.find(algId);
     if (!alg) return;
     setSelectedCategory(alg.category);
     selectAlgorithm(alg);
-  }, [selectAlgorithm]);
+  }, [selectAlgorithm, library]);
 
   return (
-    <div className="algorithm-panel">
-      <h3 className="panel-title"><span className="icon">▶</span> Algorithms</h3>
-
+    <div className="panel-stack">
       {/* ── Pattern Detector ── */}
       {detectedPattern && (
         <PatternDetector
           pattern={detectedPattern}
-          cubeSize={cubeSize}
+          label={library.label}
           onJump={detectedPattern.matchedAlg ? () => jumpToAlg(detectedPattern.matchedAlg.id) : null}
           onApplySetup={onApplySetup}
           selectedAlgId={selectedAlg?.id}
-        />
+        >
+          {detectorExtra}
+        </PatternDetector>
       )}
 
-      {/* Stage explanation strip */}
-      <div className="stage-explainer">
-        <span className="stage-explainer-text">
-          {cubeSize === 2 && 'Layer by layer: first layer → OLL → PLL. 3×3 last-layer algorithms act on the corners alone.'}
-          {cubeSize === 3 && 'CFOP method: Cross → F2L → OLL → PLL. Select a stage above to see algorithms.'}
-          {cubeSize > 3 && 'Reduction: solve the centers, pair the edges, then solve it like a 3×3. 3×3 algorithms run on the reduced cube with M, E, S and wide turns covering all inner slices.'}
-        </span>
-      </div>
+      {/* ── Library ── */}
+      <Section
+        title="Library"
+        caption="Pick one to step through it on the cube."
+        why={library.note ? <p>{library.note}</p> : null}
+      >
+        <div className="category-tabs">
+          {library.categories.map(cat => {
+            const count = library.list.filter(a => a.category === cat).length;
+            return (
+              <button
+                key={cat}
+                className={`cat-tab ${selectedCategory === cat ? 'active' : ''}`}
+                onClick={() => { setSelectedCategory(cat); setSelectedAlg(null); setStepIndex(-1); }}
+                disabled={count === 0}
+              >
+                {cat}
+              </button>
+            );
+          })}
+        </div>
 
-      {/* Category tabs */}
-      <div className="category-tabs">
-        {ALGORITHM_CATEGORIES.map(cat => {
-          const count = getAlgorithmsForSize(cubeSize).filter(a => a.category === cat).length;
-          return (
-            <button
-              key={cat}
-              className={`cat-tab ${selectedCategory === cat ? 'active' : ''}`}
-              onClick={() => { setSelectedCategory(cat); setSelectedAlg(null); setStepIndex(-1); }}
-              disabled={count === 0}
-            >
-              {cat}
-            </button>
-          );
-        })}
-      </div>
+        <div className="alg-list">
+          {algList.length === 0 && (
+            <div className="empty-msg">No algorithms in this category for the {library.label}.</div>
+          )}
+          {algList.map(alg => {
+            const selected = selectedAlg?.id === alg.id;
+            return (
+              <div key={alg.id} className={`alg-item ${selected ? 'selected' : ''}`}>
+                <button
+                  className="alg-item-head"
+                  aria-expanded={selected}
+                  onClick={() => (selected ? setSelectedAlg(null) : selectAlgorithm(alg))}
+                >
+                  <span className="alg-name">{alg.name}</span>
+                  <span className="alg-notation">{alg.notation}</span>
+                  {alg.algebraNote && <span className="alg-algebra-badge">{alg.algebraNote}</span>}
+                </button>
+                {selected && (
+                  <AlgorithmStepper
+                    alg={alg}
+                    tokens={tokens}
+                    stepIndex={stepIndex}
+                    stepping={stepping}
+                    playing={playing}
+                    intervalMs={intervalMs}
+                    onStepTo={stepTo}
+                    onReset={reset}
+                    onStepBack={stepBack}
+                    onStepForward={stepForward}
+                    onTogglePlay={() => {
+                      if (stepping) return;
+                      if (stepIndex >= tokens.length - 1) reset();
+                      setPlaying(p => !p);
+                    }}
+                    onInterval={setIntervalMs}
+                  />
+                )}
+              </div>
+            );
+          })}
+        </div>
+      </Section>
+    </div>
+  );
+}
 
-      {/* Algorithm list */}
-      <div className="alg-list">
-        {algList.length === 0 && (
-          <div className="empty-msg">No algorithms in this category for {cubeSize}×{cubeSize}.</div>
-        )}
-        {algList.map(alg => (
-          <div
-            key={alg.id}
-            className={`alg-item ${selectedAlg?.id === alg.id ? 'selected' : ''}`}
-            onClick={() => selectAlgorithm(alg)}
+function AlgorithmStepper({
+  alg, tokens, stepIndex, stepping, playing, intervalMs,
+  onStepTo, onReset, onStepBack, onStepForward, onTogglePlay, onInterval,
+}) {
+  return (
+    <div className="alg-detail">
+      {alg.description && <p className="alg-description">{alg.description}</p>}
+
+      <div className="move-tokens">
+        {tokens.map((tok, i) => (
+          <button
+            key={i}
+            className={`move-token ${i === stepIndex ? 'active' : ''} ${i < stepIndex ? 'done' : ''}`}
+            onClick={() => onStepTo(i)}
+            title={`Jump to after move ${i + 1}`}
           >
-            <div className="alg-name">{alg.name}</div>
-            <div className="alg-notation">{alg.notation}</div>
-            {alg.algebraNote && (
-              <div className="alg-algebra-badge">{alg.algebraNote}</div>
-            )}
-          </div>
+            {tok}
+          </button>
         ))}
       </div>
 
-      {/* Selected algorithm details + stepper */}
-      {selectedAlg && (
-        <div className="alg-detail">
-          <div className="alg-detail-name">{selectedAlg.name}</div>
-          {selectedAlg.category === 'OLL' && (
-            <div className="alg-stage-pill oll">OLL — orients last-layer stickers</div>
-          )}
-          {selectedAlg.category === 'PLL' && (
-            <div className="alg-stage-pill pll">PLL — permutes last-layer pieces</div>
-          )}
-          <p className="alg-description">{selectedAlg.description}</p>
-
-          {/* Move sequence tokens */}
-          <div className="move-tokens">
-            {tokens.map((tok, i) => (
-              <button
-                key={i}
-                className={`move-token ${i === stepIndex ? 'active' : ''} ${i < stepIndex ? 'done' : ''}`}
-                onClick={() => stepTo(i)}
-                title={`Apply moves 0–${i}`}
-              >
-                {tok}
-              </button>
-            ))}
-          </div>
-
-          {/* Playback controls */}
-          <div className="playback-controls">
-            <button className="ctrl-btn" onClick={reset} disabled={stepping} title="Reset">⏮</button>
-            <button className="ctrl-btn" onClick={stepBack} disabled={stepping || stepIndex < 0} title="Step back">◀</button>
-            <button
-              className={`ctrl-btn play-btn ${playing ? 'active' : ''}`}
-              onClick={() => {
-                if (stepping) return;
-                if (stepIndex >= tokens.length - 1) reset();
-                setPlaying(p => !p);
-              }}
-              title={playing ? 'Pause' : 'Play'}
-              disabled={stepping}
-            >
-              {playing ? '⏸' : '▶'}
-            </button>
-            <button className="ctrl-btn" onClick={stepForward} disabled={stepping || stepIndex >= tokens.length - 1} title="Step forward">▶</button>
-            <div className="speed-control">
-              <span className="speed-label">Speed</span>
-              <input
-                type="range"
-                min={200}
-                max={1500}
-                step={100}
-                value={intervalMs}
-                onChange={e => setIntervalMs(Number(e.target.value))}
-                className="speed-slider"
-              />
-            </div>
-          </div>
-
-          {/* Progress */}
-          <div className="step-progress">
-            <div
-              className="step-bar"
-              style={{ width: `${stepIndex < 0 ? 0 : ((stepIndex + 1) / tokens.length) * 100}%` }}
-            />
-          </div>
-          <div className="step-label">
-            {stepIndex < 0 ? 'Ready' : `Move ${stepIndex + 1} / ${tokens.length}: ${tokens[stepIndex]}`}
-          </div>
-          <div className="keyboard-hint">← → arrow keys · Space to play/pause</div>
+      <div className="playback-controls">
+        <button className="ctrl-btn" onClick={onReset} disabled={stepping} title="Reset">⏮</button>
+        <button className="ctrl-btn" onClick={onStepBack} disabled={stepping || stepIndex < 0} title="Step back">◀</button>
+        <button
+          className={`ctrl-btn play-btn ${playing ? 'active' : ''}`}
+          onClick={onTogglePlay}
+          title={playing ? 'Pause' : 'Play'}
+          disabled={stepping}
+        >
+          {playing ? '⏸' : '▶'}
+        </button>
+        <button className="ctrl-btn" onClick={onStepForward} disabled={stepping || stepIndex >= tokens.length - 1} title="Step forward">▶</button>
+        <div className="speed-control" title="Pause between moves while playing">
+          <input
+            type="range"
+            min={200}
+            max={1500}
+            step={100}
+            value={1700 - intervalMs}
+            onChange={e => onInterval(1700 - Number(e.target.value))}
+            className="speed-slider"
+            aria-label="Playback speed"
+          />
         </div>
-      )}
+      </div>
+
+      <div className="step-progress">
+        <div
+          className="step-bar"
+          style={{ width: `${stepIndex < 0 ? 0 : ((stepIndex + 1) / tokens.length) * 100}%` }}
+        />
+      </div>
+      <div className="step-label">
+        {stepIndex < 0 ? 'Ready' : `${stepIndex + 1} / ${tokens.length}`} · <kbd>←</kbd> <kbd>→</kbd> step · <kbd>Space</kbd> play
+      </div>
     </div>
   );
 }
@@ -342,22 +348,33 @@ const STAGE_META = {
   'oll-parity':  { color: '#fca5a5', icon: '±' },
   pll:           { color: '#93c5fd', icon: '⤢' },
   'pll-parity':  { color: '#fca5a5', icon: '±' },
+  'first-face':    { color: '#fb923c', icon: '▭' },
+  'second-face':   { color: '#fdba74', icon: '▭' },
+  leaves:          { color: '#a3e635', icon: '❦' },
+  'first-corners': { color: '#fb923c', icon: '◆' },
+  'other-corners': { color: '#fdba74', icon: '◆' },
 };
 
-function PatternDetector({ pattern, cubeSize, onJump, onApplySetup, selectedAlgId }) {
+function PatternDetector({ pattern, label, onJump, onApplySetup, selectedAlgId, children }) {
   const meta = STAGE_META[pattern.stage] || STAGE_META.cross;
   const { progress, matchedAlg } = pattern;
   const isParity = pattern.stage.endsWith('parity');
+  // Parity warnings are actionable, so they stay visible; the rest is explanation
+  const warnings = pattern.notes.filter(n => n.startsWith('Heads-up'));
+  const explanation = pattern.notes.filter(n => !n.startsWith('Heads-up'));
 
   return (
-    <div className={`pattern-detector${isParity ? ' parity' : ''}`} style={{ borderLeftColor: meta.color }}>
-      <div className="pd-header">
-        <span className="pd-label">Pattern Detector · {pattern.method} {cubeSize}×{cubeSize}</span>
+    <Section
+      title={`Detector · ${pattern.method} · ${label}`}
+      className={`pattern-detector${isParity ? ' parity' : ''}`}
+      style={{ borderLeftColor: meta.color }}
+      aside={(
         <span className="pd-stage-badge" style={{ background: meta.color }}>
           {meta.icon} {pattern.stageLabel}
         </span>
-      </div>
-
+      )}
+      why={explanation.length > 0 ? explanation.map(n => <p key={n}>{n}</p>) : null}
+    >
       {pattern.steps.length > 0 && (
         <ol className="pd-steps" aria-label="Solve stages">
           {pattern.steps.map(st => (
@@ -379,6 +396,8 @@ function PatternDetector({ pattern, cubeSize, onJump, onApplySetup, selectedAlgI
         </div>
       )}
 
+      {children}
+
       {matchedAlg && (
         <div className="pd-match">
           <span className="pd-match-kind">{pattern.matchKind === 'exact' ? 'Detected' : 'Try'}</span>
@@ -397,7 +416,7 @@ function PatternDetector({ pattern, cubeSize, onJump, onApplySetup, selectedAlgI
               </button>
             )}
             {onJump && selectedAlgId !== matchedAlg.id && (
-              <button className="pd-jump-btn" onClick={onJump}>→ View algorithm</button>
+              <button className="pd-jump-btn" onClick={onJump}>→ View</button>
             )}
           </span>
         </div>
@@ -411,11 +430,15 @@ function PatternDetector({ pattern, cubeSize, onJump, onApplySetup, selectedAlgI
         </div>
       )}
 
-      {pattern.notes.length > 0 && (
-        <ul className="pd-notes">
-          {pattern.notes.map(n => <li key={n}>{n}</li>)}
-        </ul>
+      {warnings.length > 0 && (
+        <div className="pd-warnings">
+          {warnings.map(w => (
+            <span key={w} className="pd-warning" title={w}>
+              ⚠ {w.includes('OLL') ? 'OLL parity ahead' : 'PLL parity ahead'}
+            </span>
+          ))}
+        </div>
       )}
-    </div>
+    </Section>
   );
 }

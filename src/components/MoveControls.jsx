@@ -18,21 +18,20 @@ const FACE_META = {
 
 const FACES = ['U', 'R', 'F', 'D', 'L', 'B'];
 
-// Isometric cube diagram, one visible face highlighted
+// Mini cube net (U on top; L F R B across; D below) with one face highlighted.
+// Unlike an isometric view, every face, including D, L and B, is visible.
+const NET_CELLS = { U: [1, 0], L: [0, 1], F: [1, 1], R: [2, 1], B: [3, 1], D: [1, 2] };
 function FaceDiagram({ highlight }) {
-  const dim = (f) => FACE_META[f]?.bg ?? '#2a2a3e';
-  const off = '#1c1c38';
+  const cell = 10, gap = 1.5;
   return (
-    <svg width={46} height={40} viewBox="0 0 50 44" style={{ display: 'block', margin: '0 auto 5px' }}>
-      {/* Top (U) */}
-      <polygon points="25,2 48,13 25,24 2,13"
-        fill={highlight === 'U' ? dim('U') : off} stroke="#444" strokeWidth="1.2" />
-      {/* Left (L) */}
-      <polygon points="2,13 25,24 25,42 2,31"
-        fill={highlight === 'L' ? dim('L') : off} stroke="#444" strokeWidth="1.2" />
-      {/* Right (R/F) – front-right face shown for F too */}
-      <polygon points="25,24 48,13 48,31 25,42"
-        fill={highlight === 'R' || highlight === 'F' ? dim(highlight) : off} stroke="#444" strokeWidth="1.2" />
+    <svg width={4 * (cell + gap)} height={3 * (cell + gap)} viewBox={`0 0 ${4 * (cell + gap)} ${3 * (cell + gap)}`}
+      style={{ display: 'block', margin: '0 auto 5px' }} aria-hidden="true">
+      {Object.entries(NET_CELLS).map(([face, [col, row]]) => (
+        <rect key={face}
+          x={col * (cell + gap)} y={row * (cell + gap)} width={cell} height={cell} rx={1.5}
+          fill={face === highlight ? FACE_META[face].bg : '#1c1c38'}
+          stroke={face === highlight ? '#0c0b09' : '#3a3420'} strokeWidth="0.8" />
+      ))}
     </svg>
   );
 }
@@ -92,11 +91,6 @@ export default function MoveControls({ onMove, cubeSize = 3, disabled = false })
     <div className="move-controls">
 
       {/* ── Header ── */}
-      <div className="mc-header">
-        <span className="mc-title">Face Moves</span>
-        <span className="mc-hint">CW &amp; CCW per face</span>
-      </div>
-
       {/* ── Outer layer: 3×2 grid with face diagrams ── */}
       <div className="mc-outer-grid">
         {FACES.map(face => (
@@ -114,11 +108,7 @@ export default function MoveControls({ onMove, cubeSize = 3, disabled = false })
       {inners.length > 0 && (
         <div className="mc-inner-section">
           <div className="mc-inner-header">
-            <span className="mc-inner-title">Inner Layers</span>
-            <span className="mc-inner-hint">
-              {cubeSize === 4 && 'Layer 2 slices (inside the outer face)'}
-              {cubeSize === 5 && 'Layers 2 & 3 — layer 3 is the center slice'}
-            </span>
+            <span className="mc-inner-title">Inner layers</span>
           </div>
 
           {inners.map(layer => (
@@ -137,24 +127,9 @@ export default function MoveControls({ onMove, cubeSize = 3, disabled = false })
             </div>
           ))}
 
-          <div className="mc-inner-note">
-            <code>2R</code> = 2nd slice from the Right face · <code>3R</code> on 5×5 = center M-slice
-          </div>
         </div>
       )}
 
-      {/* ── Face legend ── */}
-      <div className="mc-legend">
-        {FACES.map(face => {
-          const m = FACE_META[face];
-          return (
-            <div key={face} className="mc-legend-item">
-              <div className="mc-legend-chip" style={{ background: m.bg, color: m.fg }}>{face}</div>
-              <span className="mc-legend-name">{m.name}</span>
-            </div>
-          );
-        })}
-      </div>
     </div>
   );
 }

@@ -1,19 +1,17 @@
 import { useMemo } from 'react';
 import FaceletGraph from './FaceletGraph';
-import { buildFaceletGraph, describeMove } from '../lib/faceletGraph';
 
 /**
  * GraphSidePanel - the facelet graph shown beside the 3D cube, with a
  * readout of the current move as a permutation and an orbit legend.
- * Mount with key={size}.
+ * Mount with a key per puzzle.
  */
 export default function GraphSidePanel({
-  state, size, highlightFace, animateRef,
+  graph, state, highlightFace, animateRef,
   focusOrbit, onFocusOrbit, showOrbits, onShowOrbits,
   move, onMoveChange, onClose, onExplain,
 }) {
-  const graph = useMemo(() => buildFaceletGraph(size), [size]);
-  const desc = useMemo(() => describeMove(graph, move), [graph, move]);
+  const desc = useMemo(() => (move ? graph.describeTurn(move) : null), [graph, move]);
 
   return (
     <div className="flatmap-side graph-side">
@@ -33,7 +31,7 @@ export default function GraphSidePanel({
       <div className="graph-side-body">
         <FaceletGraph
           state={state}
-          size={size}
+          graph={graph}
           highlightFace={highlightFace}
           animateRef={animateRef}
           focusOrbit={focusOrbit}
@@ -49,7 +47,7 @@ export default function GraphSidePanel({
             <span className="gsm-notation">{desc.notation}</span>
             <span className="gsm-eq">=</span>
             <span className="gsm-text">
-              {desc.total} disjoint 4-cycles
+              {desc.total} disjoint {desc.cycleLength ?? 4}-cycles
               {desc.parts.map(p => (
                 <span key={p.id} className="gsm-part">
                   <span className="gsm-dot" style={{ background: p.color }} />
@@ -59,7 +57,7 @@ export default function GraphSidePanel({
             </span>
           </>
         ) : (
-          <span className="gsm-hint">Turn a layer: each dot slides along its circle, in step with the cube.</span>
+          <span className="gsm-hint">Turn a layer to see its cycles.</span>
         )}
       </div>
 

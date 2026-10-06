@@ -1,4 +1,5 @@
 import { useMemo } from 'react';
+import Section from './ui/Section';
 import { analyzeSequence } from '../lib/cubeState';
 import {
   buildFaceletGraph, generatorSigns, orbitColorMatch, orbitDiameters,
@@ -67,72 +68,67 @@ export default function GraphTheoryPanel({
   }), []);
 
   return (
-    <div className="algebra-panel graph-panel">
-      <h3 className="panel-title"><span className="icon">◎</span> Graph Theory</h3>
-
-      <div className="algebra-intro-card">
-        <div className="aic-title">The cube as a colored graph</div>
-        <p className="aic-body">
-          Draw one <strong>vertex</strong> for every facelet position ({graph.nodes.length} on
-          the {N}×{N}). For every generator <em>g</em> (a quarter turn of one layer), draw an
-          <strong> edge</strong> from each facelet <em>x</em> to <em>g(x)</em>, the slot the
-          turn carries it to. That is the <strong>Schreier graph</strong> of the cube
-          group G acting on facelets.
-        </p>
-        <p className="aic-body">
-          A cube state is then just a <em>coloring</em> of the vertices. Applying g pushes every
-          color one step along the g-edges. The solved state is the coloring where each face's
-          vertices share one color.
-        </p>
-        {!graphVisible && (
-          <button className="gp-show-btn" onClick={onShowGraph}>◎ Show the graph beside the cube</button>
+    <div className="panel-stack">
+      {/* ── The graph ── */}
+      <Section
+        title="The cube as a graph"
+        caption={`${graph.nodes.length} vertices, one per sticker slot; ${graph.circles.length} circles.`}
+        aside={!graphVisible && (
+          <button className="ui-chip-btn" onClick={onShowGraph}>◎ Show graph</button>
         )}
-      </div>
-
-      {/* ── Reading the picture ── */}
-      <div className="algebra-section">
-        <div className="section-label">Why the picture is made of circles</div>
-        <p className="gp-body">
-          Put the facelets on a sphere so that a layer turn is a <em>rigid rotation</em> of part
-          of the sphere: a facelet whose cubie sits at layers (i, j) on the two axes along its
-          face gets coordinates (λᵢ, λⱼ, ±√(1 − λᵢ² − λⱼ²)), with evenly spaced latitudes λ.
-          A quarter turn then maps this point set onto itself exactly, and every facelet it moves
-          travels along a <strong>circle of latitude</strong> around the turn's axis.
-        </p>
-        <p className="gp-body">
-          The drawing projects that sphere from the hidden DLB corner, so U, F, R form the middle
-          hexagon (the view the 3D cube starts in) and D, L, B wrap around the outside. Each axis
-          gives one family of nested loops:
-        </p>
+        why={<>
+          <p>
+            For every turn <em>g</em>, draw an edge from each sticker slot <em>x</em> to <em>g(x)</em>.
+            This is the <strong>Schreier graph</strong> of the cube group acting on sticker slots, and a
+            cube state is a coloring of its vertices.
+          </p>
+          <p>
+            The slots sit on a sphere so that every turn is a rigid rotation: each sticker it moves
+            travels along a circle of latitude around the turn&apos;s axis. Projected from the hidden DLB
+            corner, U, F, R form the middle and each axis gives one family of nested loops.
+          </p>
+        </>}
+      >
         <div className="gp-stat-row">
-          <div className="gp-stat"><span className="gp-stat-v">{belts}</span><span className="gp-stat-l">belt loops<br />{N} layers × 3 axes</span></div>
-          <div className="gp-stat"><span className="gp-stat-v">{caps}</span><span className="gp-stat-l">cap loops<br />faces spinning in place</span></div>
-          <div className="gp-stat"><span className="gp-stat-v">{graph.nodes.length}</span><span className="gp-stat-l">vertices<br />6 × {N}²</span></div>
+          <div className="gp-stat"><span className="gp-stat-v">{belts}</span><span className="gp-stat-l">belt loops</span></div>
+          <div className="gp-stat"><span className="gp-stat-v">{caps}</span><span className="gp-stat-l">cap loops</span></div>
+          <div className="gp-stat"><span className="gp-stat-v">{graph.nodes.length}</span><span className="gp-stat-l">vertices</span></div>
         </div>
-        <p className="gp-note">
-          During a turn the edges of that generator light up. Each arc is one edge x → g(x),
-          and the dots slide along it in step with the cube.
-          {lastDesc && (
-            <> The last turn, <span className="math-mono">{lastDesc.notation}</span>, is {lastDesc.total} disjoint
-            4-cycles: {lastDesc.parts.map(p => `${p.count} on ${p.label}`).join(', ')}.</>
-          )}
-        </p>
-      </div>
+        {lastDesc && (
+          <p className="gp-note">
+            <span className="math-mono">{lastDesc.notation}</span> = {lastDesc.total} disjoint 4-cycles
+            ({lastDesc.parts.map(p => `${p.count} ${p.label}`).join(', ')})
+          </p>
+        )}
+      </Section>
 
       {/* ── Components = orbits ── */}
-      <div className="algebra-section">
-        <div className="section-label">Connected components = orbits</div>
-        <p className="gp-body">
-          Two vertices lie in the same component exactly when some sequence of turns carries one
-          facelet to the other, so the components are the <strong>orbits</strong> of G. Click one
-          to isolate it in the graph.
-        </p>
+      <Section
+        title="Orbits"
+        caption="Connected components: where a sticker can ever go. Click to isolate."
+        why={<>
+          <p>
+            Two slots are connected exactly when some sequence of turns carries one to the other,
+            so the components are the <strong>orbits</strong> of the group. Each is also an orbit of
+            the 24 rotations of the whole cube (O ≅ S₄), which fixes no slot except a face&apos;s middle
+            one, so every orbit has 24 vertices: (N² − [N odd]) / 4 of them.
+            {' '}<span className={rotationCheck ? 'gp-ok' : 'gp-bad'}>
+              {rotationCheck ? '✓ Checked live for this cube.' : '✗ Live check failed.'}
+            </span>
+          </p>
+          <p>Turns never mix orbits, so the group embeds in a product of symmetric groups:</p>
+          <div className="pte-formula">
+            G ↪ {orbits.map(o => 'S' + toSub(o.members.length)).join(' × ')}
+          </div>
+          <p>{SIZE_NOTES[N]}</p>
+        </>}
+      >
         <div className="gp-table" role="table">
           <div className="gp-tr gp-th" role="row">
             <span role="columnheader">Orbit</span>
-            <span role="columnheader" title="Number of vertices">|Ω|</span>
-            <span role="columnheader" title="Largest number of quarter turns needed to move one facelet of this orbit to any other slot of it">diam</span>
-            <span role="columnheader" title="Vertices currently showing their home face's color">home color</span>
+            <span role="columnheader" title="Number of vertices">size</span>
+            <span role="columnheader" title="Most quarter turns needed to move a sticker to any slot of its orbit">diam</span>
+            <span role="columnheader" title="Slots showing their home color">home</span>
           </div>
           {orbits.map(o => {
             const m = match[o.id];
@@ -162,47 +158,25 @@ export default function GraphTheoryPanel({
               <span role="cell" className="gp-orbit-name"><span className="gsl-ring" style={{ borderColor: fixed.color }} />Face centers</span>
               <span role="cell" className="math-mono">6 × 1</span>
               <span role="cell" className="math-mono">0</span>
-              <span role="cell" className="gp-muted">isolated vertices</span>
+              <span role="cell" className="gp-muted">fixed</span>
             </div>
           )}
         </div>
-
-        <div className="gp-theorem">
-          <div className="gp-theorem-title">Every component has exactly 24 vertices</div>
-          <p>
-            Each component is also an orbit of the 24 rotations of the whole cube, the rotation
-            group O ≅ S₄. Apart from the middle facelet of a face, no facelet is fixed by any
-            rotation except the identity, so each orbit has |O| = 24 elements. That gives
-          </p>
-          <div className="pte-formula">#components of size 24 = (N² − [N odd]) / 4</div>
-          <p>
-            and for the {N}×{N} that is {orbits.length}
-            {fixed ? `, plus ${fixed.members.length} fixed centers` : ''}.{' '}
-            <span className={rotationCheck ? 'gp-ok' : 'gp-bad'}>
-              {rotationCheck ? '✓ Checked live for this cube: every component is a single O-orbit.' : '✗ Live check failed.'}
-            </span>
-          </p>
-        </div>
-
-        <p className="gp-body">
-          Because turns never mix components, G embeds in the product of the symmetric groups on
-          the components:
-        </p>
-        <div className="pte-formula">
-          G ↪ {orbits.map(o => 'S' + toSub(o.members.length)).join(' × ')}
-          {'  '}(not all of S{toSub(graph.nodes.length)})
-        </div>
-      </div>
+      </Section>
 
       {/* ── Sign characters ── */}
-      <div className="algebra-section">
-        <div className="section-label">Parity per component</div>
-        <p className="gp-body">
-          Restricted to one component, a quarter turn is a product of 4-cycles, and each 4-cycle
-          is odd. So a turn's sign on that component is (−1)<sup>#4-cycles</sup>. Sign is a
-          homomorphism, so these few numbers predict the parity of <em>any</em> sequence on
-          every component.
-        </p>
+      <Section
+        title="Parity per orbit"
+        caption="Sign of each turn on each orbit, and your moves so far."
+        why={<>
+          <p>
+            On one orbit, a quarter turn is a product of 4-cycles, each odd, so its sign is
+            (−1)<sup>#4-cycles</sup>. Sign is a homomorphism, so this table predicts the parity of any
+            sequence on every orbit; ✓ marks where your moves match the prediction.
+          </p>
+          <p>{signInsight(N)}</p>
+        </>}
+      >
         <div className="gp-sign-table" style={{ gridTemplateColumns: `auto repeat(${orbits.length}, 1fr)` }}>
           <span className="gp-sign-head">turn</span>
           {orbits.map(o => (
@@ -213,69 +187,52 @@ export default function GraphTheoryPanel({
           {signRows.map(r => (
             <SignRow key={r.layer} row={r} orbits={orbits} graph={graph} />
           ))}
-        </div>
-        <p className="gp-note">{signInsight(N)}</p>
-
-        <div className="section-label" style={{ marginTop: 12 }}>
-          Your moves so far ({cumulative.count} quarter turn{cumulative.count === 1 ? '' : 's'} since reset/scramble)
-        </div>
-        <div className="gp-cum">
+          <span className="gp-sign-label math-mono" title={`${cumulative.count} quarter turns since reset/scramble`}>
+            yours ({cumulative.count})
+          </span>
           {orbits.map(o => {
             const e = cumulative.byOrbit[o.id];
-            const predictedParity = cumulative.predicted[o.id] > 0 ? 'even' : 'odd';
+            const predicted = cumulative.predicted[o.id] > 0 ? 'even' : 'odd';
             return (
-              <div key={o.id} className="gp-cum-row">
-                <span className="gp-orbit-name"><span className="gsl-ring" style={{ borderColor: o.color }} />{o.label}</span>
-                <span className="math-mono gp-cum-cycles" title="Cycle type of the accumulated permutation on this component">
-                  {e.cycles.length ? cycleType(e.cycles) : 'id'}
-                </span>
-                <span className={`pt-parity ${e.parity}`} title={`Predicted from sign characters: ${predictedParity}`}>
-                  {e.parity}{e.parity === predictedParity ? ' ✓' : ' ✗'}
-                </span>
-              </div>
+              <span key={o.id} className={`gp-sign ${e.parity}`}
+                title={`${e.cycles.length ? cycleType(e.cycles) : 'identity'} · predicted ${predicted}`}>
+                {e.parity === 'even' ? '+1' : '−1'}{e.parity === predicted ? ' ✓' : ' ✗'}
+              </span>
             );
           })}
         </div>
-        <p className="gp-note">
-          ✓ means the measured parity matches the prediction from the table above.
-        </p>
-      </div>
+      </Section>
 
       {/* ── Schreier vs Cayley ── */}
-      <div className="algebra-section">
-        <div className="section-label">Schreier graph vs Cayley graph</div>
+      <Section
+        title="Schreier vs Cayley graph"
+        why={<p>
+          The Cayley graph has one vertex per cube <em>state</em> ({GROUP_ORDERS[N]} for the {N}×{N});
+          its diameter is God&apos;s number, known for the 3×3 to be 20 in half turns and 26 in quarter
+          turns. Fixing one sticker folds it down by the stabilizer of that sticker: the Schreier
+          graph, 24 vertices per orbit instead.
+        </p>}
+      >
         <div className="concept-grid">
           <div className="concept-card">
             <div className="concept-title">Cayley graph</div>
-            <div className="concept-math">vertices = G</div>
-            <div className="concept-desc">
-              One vertex per cube <em>state</em>: {GROUP_ORDERS[N]} of them for the {N}×{N}.
-              Its diameter is God's number, known for the 3×3 to be 20 in the half-turn metric
-              and 26 in quarter turns. Far too big to draw.
-            </div>
+            <div className="concept-math">one vertex per state · {GROUP_ORDERS[N]}</div>
           </div>
           <div className="concept-card">
             <div className="concept-title">Schreier graph</div>
-            <div className="concept-math">vertices = G / Stab(x)</div>
-            <div className="concept-desc">
-              Fix one facelet x and ask only where it can go. Each component is the Cayley graph
-              folded down by the stabilizer of a facelet: 24 vertices instead of {GROUP_ORDERS[N]}.
-              Its diameter here is {Math.max(...diameters.map(d => d.diameter))} quarter turns.
-            </div>
+            <div className="concept-math">one vertex per slot · diameter {Math.max(...diameters.map(d => d.diameter))}</div>
           </div>
         </div>
-      </div>
+      </Section>
 
       {/* ── The N×N family ── */}
-      <div className="algebra-section">
-        <div className="section-label">The same picture for every N</div>
-        <p className="gp-body">{SIZE_NOTES[N]}</p>
+      <Section title="Every size" caption="Switch sizes in the header to compare.">
         <div className="gp-table gp-family" role="table">
           <div className="gp-tr gp-th" role="row">
             <span role="columnheader">cube</span>
             <span role="columnheader">vertices</span>
-            <span role="columnheader">belts + caps</span>
-            <span role="columnheader">components</span>
+            <span role="columnheader">circles</span>
+            <span role="columnheader">orbits</span>
           </div>
           {family.map(f => (
             <div key={f.n} role="row" className={`gp-tr${f.n === N ? ' current' : ''}`}>
@@ -286,8 +243,7 @@ export default function GraphTheoryPanel({
             </div>
           ))}
         </div>
-        <p className="gp-note">Switch sizes in the header to see each graph and watch it animate.</p>
-      </div>
+      </Section>
     </div>
   );
 }

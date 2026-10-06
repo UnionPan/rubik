@@ -2,6 +2,7 @@ import { useRef, useEffect, useCallback } from 'react';
 import * as THREE from 'three';
 import { FACE, applyTurn, turnToNotation } from '../lib/cubeState';
 import { easeInOutQuad, tweenProgress } from '../lib/tween';
+import { createStage } from './three/stage';
 
 // Official WCA face colors
 const FACE_COLOR_MAP = [
@@ -62,7 +63,6 @@ function updateCubieCoordsCW(cubie, face, N) {
 
 // Faces on the positive / negative end of each axis (x, y, z)
 const AXIS_FACES = [['R', 'L'], ['U', 'D'], ['F', 'B']];
-const DRAG_THRESHOLD_PX = 10;
 
 /**
  * The layer turn a drag across a sticker asks for.
@@ -133,14 +133,7 @@ function getCubieColors(state, N, cx, cy, cz) {
 export default function CubeViewer3D({ state, size = 3, highlightFace = null, animateMoveRef = null, onTurn = null }) {
   const mountRef    = useRef(null);
   const sceneRef    = useRef(null);
-  const cameraRef   = useRef(null);
-  const rendererRef = useRef(null);
-  const frameRef    = useRef(null);
 
-  // Orbit state
-  // Default view: looking down at the URF corner (U on top, F left, R right),
-  // the same corner the facelet graph is centred on.
-  const rotRef   = useRef({ theta: 0.62, phi: 0.5 }); // theta=azimuth, phi=elevation
   const onTurnRef = useRef(onTurn);
   useEffect(() => { onTurnRef.current = onTurn; }, [onTurn]);
 
@@ -224,156 +217,40 @@ export default function CubeViewer3D({ state, size = 3, highlightFace = null, an
     const el = mountRef.current;
     if (!el) return;
 
-    const w = el.clientWidth || 420;
-    const h = el.clientHeight || 420;
+    // The cube spans ~3.2 units; its bounding sphere has radius ≈ 2.9
+    const stage = createStage(el, { boundingRadius: 2.9 });
+    sceneRef.current = stage.scene;
+    buildCubies(sizeRef.current, stage.scene, stateRef.current);
 
-    const scene    = new THREE.Scene();
-    scene.background = new THREE.Color('#100e0a');
-    sceneRef.current = scene;
-
-    const camera = new THREE.PerspectiveCamera(42, w / h, 0.1, 100);
-    cameraRef.current = camera;
-
-    // Physically based light units (three r155+): Lambert shading divides by π,
-    // so these values put the lit U face at full white while F and R keep
-    // visible shading (≈ 0.83 and 0.72 of full brightness in linear light).
-    const ambient = new THREE.AmbientLight(0xffffff, 1.4);
-    scene.add(ambient);
-    const dir = new THREE.DirectionalLight(0xffffff, 2.3);
-    dir.position.set(5, 10, 7);
-    scene.add(dir);
-
-    const renderer = new THREE.WebGLRenderer({ antialias: true });
-    renderer.setSize(w, h);
-    renderer.setPixelRatio(window.devicePixelRatio);
-    el.appendChild(renderer.domElement);
-    rendererRef.current = renderer;
-
-    buildCubies(sizeRef.current, scene, stateRef.current);
-
-    // ── Orbit: spherical coords ──
-    // Distance that keeps the whole cube (bounding sphere ≈ 2.9 units) in frame
-    // for both the vertical FOV and, in narrow viewports, the horizontal one.
-    const fitRadius = () => {
-      const CUBE_RADIUS = 2.9;
-      const vHalf = THREE.MathUtils.degToRad(camera.fov / 2);
-      const hHalf = Math.atan(Math.tan(vHalf) * camera.aspect);
-      return Math.max(9, CUBE_RADIUS / Math.sin(Math.min(vHalf, hHalf)));
-    };
-
-    const updateCamera = () => {
-      const { theta, phi } = rotRef.current;
-      const radius = fitRadius();
-      const clampedPhi = Math.max(-Math.PI/2 + 0.05, Math.min(Math.PI/2 - 0.05, phi));
-      camera.position.set(
-        radius * Math.cos(clampedPhi) * Math.sin(theta),
-        radius * Math.sin(clampedPhi),
-        radius * Math.cos(clampedPhi) * Math.cos(theta),
-      );
-      camera.lookAt(0, 0, 0);
-    };
-
-    // Pointer input (mouse, touch, pen):
-    //   drag starting on a sticker → turn that sticker's layer in the drag direction
-    //   drag starting on the background → orbit the camera
-    const raycaster = new THREE.Raycaster();
-    let gesture = null; // { mode: 'orbit'|'turn'|'done', id, x, y, hit }
-
-    const hitSticker = (clientX, clientY) => {
-      if (animatingRef.current) return null; // cubie coords are stale mid-turn
-      const rect = el.getBoundingClientRect();
-      const ndc = new THREE.Vector2(
-        ((clientX - rect.left) / rect.width) * 2 - 1,
-        -((clientY - rect.top) / rect.height) * 2 + 1,
-      );
-      raycaster.setFromCamera(ndc, camera);
-      const hit = raycaster.intersectObjects(cubiesRef.current.map(c => c.mesh), false)[0];
-      if (!hit) return null;
-      const cubie = cubiesRef.current.find(c => c.mesh === hit.object);
-      const normal = hit.face.normal.clone().round(); // meshes are unrotated between turns
-      return { cubie, normal, point: hit.point };
-    };
-
-    // Screen direction (pixels) of a world-space step from p along axis u
-    const screenStep = (p, u) => {
-      const rect = el.getBoundingClientRect();
-      const a = p.clone().project(camera), b = p.clone().addScaledVector(u, 0.5).project(camera);
-      return new THREE.Vector2((b.x - a.x) * rect.width / 2, -(b.y - a.y) * rect.height / 2);
-    };
-
-    const onPointerDown = (e) => {
-      if (e.button !== 0 || gesture) return;
-      const hit = hitSticker(e.clientX, e.clientY);
-      gesture = { mode: hit ? 'turn' : 'orbit', id: e.pointerId, x: e.clientX, y: e.clientY, hit };
-      el.setPointerCapture(e.pointerId);
-    };
-    const onPointerMove = (e) => {
-      if (!gesture || e.pointerId !== gesture.id) return;
-      const dx = e.clientX - gesture.x;
-      const dy = e.clientY - gesture.y;
-      if (gesture.mode === 'orbit') {
-        gesture.x = e.clientX;
-        gesture.y = e.clientY;
-        // Drag right → cube appears to rotate right → camera orbits left → theta decreases
-        rotRef.current.theta -= dx * 0.012;
-        rotRef.current.phi   += dy * 0.012; // drag down → camera rises → see more of the top face
-        return;
-      }
-      if (gesture.mode !== 'turn' || Math.hypot(dx, dy) < DRAG_THRESHOLD_PX) return;
-      // Pick the in-plane axis whose on-screen direction best matches the drag
-      const { cubie, normal, point } = gesture.hit;
-      const drag = new THREE.Vector2(dx, dy);
-      let best = null;
-      for (const axis of [new THREE.Vector3(1, 0, 0), new THREE.Vector3(0, 1, 0), new THREE.Vector3(0, 0, 1)]) {
-        if (Math.abs(axis.dot(normal)) > 0.5) continue;
-        const step = screenStep(point, axis);
-        const len = step.length();
-        if (len < 1e-6) continue;
-        const score = drag.dot(step) / len;
-        if (!best || Math.abs(score) > Math.abs(best.score)) best = { axis, score };
-      }
-      gesture.mode = 'done';
-      if (!best) return;
-      const dir = best.axis.clone().multiplyScalar(Math.sign(best.score));
-      const turn = turnForDrag(cubie, normal, dir, sizeRef.current);
-      if (turn) onTurnRef.current?.(turn);
-    };
-    const onPointerUp = (e) => {
-      if (gesture && e.pointerId === gesture.id) gesture = null;
-    };
-
-    el.addEventListener('pointerdown', onPointerDown);
-    el.addEventListener('pointermove', onPointerMove);
-    el.addEventListener('pointerup', onPointerUp);
-    el.addEventListener('pointercancel', onPointerUp);
-
-    // Render loop
-    const animate = () => {
-      frameRef.current = requestAnimationFrame(animate);
-      updateCamera();
-      renderer.render(scene, camera);
-    };
-    animate();
-
-    // Resize observer
-    const ro = new ResizeObserver(() => {
-      const w2 = el.clientWidth, h2 = el.clientHeight;
-      camera.aspect = w2 / h2;
-      camera.updateProjectionMatrix();
-      renderer.setSize(w2, h2);
+    // A drag that starts on a sticker turns that sticker's layer in the drag direction
+    stage.setGestures({
+      pick: (x, y) => {
+        if (animatingRef.current) return null; // cubie coords are stale mid-turn
+        const hit = stage.pick(x, y, cubiesRef.current.map(c => c.mesh));
+        if (!hit) return null;
+        const cubie = cubiesRef.current.find(c => c.mesh === hit.object);
+        const normal = hit.face.normal.clone().round(); // meshes are unrotated between turns
+        return { cubie, normal, point: hit.point };
+      },
+      onTurnDrag: ({ cubie, normal, point }, drag) => {
+        // Pick the in-plane axis whose on-screen direction best matches the drag
+        let best = null;
+        for (const axis of [new THREE.Vector3(1, 0, 0), new THREE.Vector3(0, 1, 0), new THREE.Vector3(0, 0, 1)]) {
+          if (Math.abs(axis.dot(normal)) > 0.5) continue;
+          const step = stage.screenStep(point, axis);
+          const len = step.length();
+          if (len < 1e-6) continue;
+          const score = drag.dot(step) / len;
+          if (!best || Math.abs(score) > Math.abs(best.score)) best = { axis, score };
+        }
+        if (!best) return;
+        const dir = best.axis.clone().multiplyScalar(Math.sign(best.score));
+        const turn = turnForDrag(cubie, normal, dir, sizeRef.current);
+        if (turn) onTurnRef.current?.(turn);
+      },
     });
-    ro.observe(el);
 
-    return () => {
-      cancelAnimationFrame(frameRef.current);
-      el.removeEventListener('pointerdown', onPointerDown);
-      el.removeEventListener('pointermove', onPointerMove);
-      el.removeEventListener('pointerup', onPointerUp);
-      el.removeEventListener('pointercancel', onPointerUp);
-      ro.disconnect();
-      renderer.dispose();
-      if (el.contains(renderer.domElement)) el.removeChild(renderer.domElement);
-    };
+    return () => stage.dispose();
   }, []); // eslint-disable-line react-hooks/exhaustive-deps
 
   // ── Rebuild cubies when size changes ──────────────────────────────────

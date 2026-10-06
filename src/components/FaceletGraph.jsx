@@ -1,37 +1,33 @@
-import { useRef, useEffect, useLayoutEffect, useCallback, useMemo, useState } from 'react';
-import { applyTurn, FACE_NAMES } from '../lib/cubeState';
-import {
-  buildFaceletGraph, nodesInSlice, circlesForMove, nodePositionDuring,
-} from '../lib/faceletGraph';
+import { useRef, useEffect, useLayoutEffect, useCallback, useMemo, useState, useId } from 'react';
+import { FACE_NAMES } from '../lib/cubeState';
 import { easeInOutQuad, tweenProgress } from '../lib/tween';
 
-const FACE_COLOR_MAP = ['#FFFFFF', '#B71234', '#009B48', '#FFD500', '#FF5800', '#0046AD'];
 const DOT_STROKE = '#0c0b09';
 
 /**
- * FaceletGraph - the cube drawn as a colored graph.
+ * FaceletGraph - a puzzle drawn as a colored graph.
  *
  * Every facelet is a vertex; the loops are the circles along which facelets
  * travel when a layer turns.  Animations are driven imperatively (no React
  * re-render per frame) from the same start time and easing as the 3D cube,
  * so both views move in lockstep.
  *
- * Mount with key={size}: the vertex set depends on N.
+ * Mount with a key per puzzle: the vertex set depends on it.
  *
  * Props:
- *   state, size           - cube state and N
+ *   graph                 - graph model (cubeGraphModel(N) or a puzzle's .graph)
+ *   state                 - puzzle state
  *   highlightFace         - face letter to outline, or null
- *   animateRef            - ref; set to fn(turn, durationMs, startTime), turn = { face, layers, cw, notation }
+ *   animateRef            - ref; set to fn(turn, durationMs, startTime)
  *   focusOrbit            - orbit id to isolate, or null
  *   onFocusOrbit(id|null) - called when a vertex is clicked
  *   showOrbits            - draw each vertex's orbit as a colored ring
  *   onMoveChange(move)    - reports the turn currently shown ({ ...turn, running })
  */
 export default function FaceletGraph({
-  state, size, highlightFace = null, animateRef = null,
+  graph, state, highlightFace = null, animateRef = null,
   focusOrbit = null, onFocusOrbit = null, showOrbits = false, onMoveChange = null,
 }) {
-  const graph = useMemo(() => buildFaceletGraph(size), [size]);
   const dotR = graph.spacing * 0.42;
   const pad = dotR * 2.2;
   const extent = graph.radius + pad;
@@ -54,7 +50,7 @@ export default function FaceletGraph({
     for (const n of g.nodes) {
       const el = els[n.i];
       if (!el) continue;
-      el.setAttribute('fill', FACE_COLOR_MAP[st[n.f][n.r][n.c]]);
+      el.setAttribute('fill', g.colors[g.colorOf(st, n.i)]);
       el.setAttribute('cx', n.xy[0]);
       el.setAttribute('cy', n.xy[1]);
     }
@@ -63,7 +59,7 @@ export default function FaceletGraph({
   const finish = useCallback((anim) => {
     cancelAnimationFrame(anim.raf);
     animRef.current = null;
-    const post = applyTurn(stateRef.current, anim.turn);
+    const post = graphRef.current.applyTurn(stateRef.current, anim.turn);
     stateRef.current = post;
     // Each moving dot now sits exactly on its destination vertex carrying its
     // old color, which is the destination's new color - so recoloring and
@@ -88,9 +84,8 @@ export default function FaceletGraph({
   const animate = useCallback((turn, duration, startTime) => {
     if (animRef.current) finish(animRef.current);
     const g = graphRef.current;
-    const { face, cw } = turn;
     const start = startTime ?? performance.now();
-    const moving = nodesInSlice(g, face, turn.layers);
+    const moving = g.movingNodes(turn);
     const anim = { turn, start, duration, moving, raf: 0 };
     animRef.current = anim;
     reportMove({ ...turn, running: true });
@@ -102,7 +97,7 @@ export default function FaceletGraph({
       for (const i of moving) {
         const el = dotRefs.current[i];
         if (!el) continue;
-        const [x, y] = nodePositionDuring(g, i, face, cw, et);
+        const [x, y] = g.positionDuring(i, turn, et);
         el.setAttribute('cx', x);
         el.setAttribute('cy', y);
       }
@@ -124,7 +119,7 @@ export default function FaceletGraph({
   // ── Derived drawing data ────────────────────────────────────────────────
   const activeCircles = useMemo(() => {
     if (!move) return new Set();
-    return new Set(circlesForMove(graph, move.face, move.layers).map(c => c.key));
+    return graph.circleKeysFor(move);
   }, [graph, move]);
 
   // Schreier-graph edges of the current generator: x → g(x), drawn as the arc
@@ -132,9 +127,9 @@ export default function FaceletGraph({
   const arcs = useMemo(() => {
     if (!move) return [];
     const STEPS = 24;
-    return nodesInSlice(graph, move.face, move.layers).flatMap(i => {
+    return graph.movingNodes(move).flatMap(i => {
       const pts = [];
-      for (let s = 0; s <= STEPS; s++) pts.push(nodePositionDuring(graph, i, move.face, move.cw, s / STEPS));
+      for (let s = 0; s <= STEPS; s++) pts.push(graph.positionDuring(i, move, s / STEPS));
       const [x0, y0] = pts[0];
       const [x1, y1] = pts[STEPS];
       if (Math.hypot(x1 - x0, y1 - y0) < 1e-6) return []; // fixed point (face center)
@@ -147,7 +142,10 @@ export default function FaceletGraph({
 
   const orbitById = graph.orbits;
   const faceIdx = highlightFace ? FACE_NAMES.indexOf(highlightFace) : -1;
-  const arrowId = `fg-arrow-${size}`;
+  const arrowId = `fg-arrow-${useId().replace(/:/g, '')}`;
+  // Labels inside a dot, or in the gap between dots: cube poles have room, the
+  // gaps around a 2×2 pole or an Ivy corner are tighter
+  const labelScale = graph.labelsOnDots ? 1.05 : graph.kind === 'cube' && graph.N !== 2 ? 1.45 : 0.95;
 
   return (
     <svg
@@ -155,7 +153,7 @@ export default function FaceletGraph({
       viewBox={`${-extent} ${-extent} ${2 * extent} ${2 * extent}`}
       preserveAspectRatio="xMidYMid meet"
       role="img"
-      aria-label={`Facelet graph of the ${size}×${size} cube`}
+      aria-label="Facelet graph"
     >
       <defs>
         <marker id={arrowId} viewBox="0 0 10 10" refX="7" refY="5" markerUnits="userSpaceOnUse"
@@ -192,10 +190,10 @@ export default function FaceletGraph({
         {graph.nodes.map(n => {
           const orbit = orbitById[n.orbit];
           const dimmed = focusOrbit != null && n.orbit !== focusOrbit;
-          const onFace = n.f === faceIdx;
+          const onFace = n.face === faceIdx;
           return (
             <circle
-              key={`${size}-${n.i}`}
+              key={n.i}
               ref={el => { dotRefs.current[n.i] = el; }}
               r={dotR}
               className={`fg-dot${onFace ? ' on-face' : ''}`}
@@ -204,16 +202,16 @@ export default function FaceletGraph({
               opacity={dimmed ? 0.14 : 1}
               onClick={() => onFocusOrbit?.(focusOrbit === n.orbit ? null : n.orbit)}
             >
-              <title>{`${FACE_NAMES[n.f]}[${n.r}][${n.c}] · ${orbit.label} orbit`}</title>
+              <title>{`${graph.labelOf(n.i)} · ${orbit.label} orbit`}</title>
             </circle>
           );
         })}
       </g>
 
-      {/* Face labels at each face's pole (inside the fixed center dot on odd cubes) */}
-      <g className={`fg-face-labels${size % 2 ? ' on-dot' : ''}`} pointerEvents="none">
+      {/* Face (or axis) labels; on odd cubes they sit inside the fixed center dot */}
+      <g className={`fg-face-labels${graph.labelsOnDots ? ' on-dot' : ''}`} pointerEvents="none">
         {graph.faceLabels.map(({ name, xy }) => (
-          <text key={name} x={xy[0]} y={xy[1]} fontSize={dotR * (size % 2 ? 1.05 : size === 2 ? 0.95 : 1.45)}
+          <text key={name} x={xy[0]} y={xy[1]} fontSize={dotR * labelScale}
             textAnchor="middle" dominantBaseline="central"
             strokeWidth={dotR * 0.22}>{name}</text>
         ))}

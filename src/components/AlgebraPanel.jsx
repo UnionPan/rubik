@@ -1,53 +1,43 @@
 import { useMemo, useState, useCallback } from 'react';
-import {
-  permToCycles, solvedState, analyzeSequence, isSolved,
-  getTurnPositionCycles, formatCycles,
-  FACE_NAMES, COLORS,
-} from '../lib/cubeState';
+import { permToCycles, solvedState, FACE_NAMES, COLORS } from '../lib/cubeState';
+import { algorithmOrder } from '../lib/algorithms';
+import Section from './ui/Section';
 
-// ── Size-specific Group Theory text ──────────────────────────────────────────
-
-const ORDER_DESCS = {
-  2: "How many times you repeat a sequence before the cube returns to start. The 2×2 has only corners, so cycle lengths are LCMs of corner cycles. R U on the 2×2 has order 105 (same corner permutation as 3×3 since R U only touches corners).",
-  3: "How many times you repeat the same sequence before the cube returns to where it started. For R U, the order is 105 — doing it 105 times lands back on solved. For 3×3, order is always ≤1260.",
-  4: "The 4×4 introduces inner-layer moves (2R, 2U…). These interact with center and edge pieces in new ways, producing much larger orders. A single move combo like R 2R U can have order in the thousands.",
-  5: "The 5×5 has three center layers per axis. Orders of move combinations grow dramatically — inner slice moves create long cycles across the 25-sticker centers, pushing orders into the tens of thousands.",
+const GROUP_SIZES = {
+  2: { math: '|G₂| = 3,674,160', fact: "God's number for the 2×2 is 11 (half turns)." },
+  3: { math: '|G₃| ≈ 4.3 × 10¹⁹', fact: "God's number for the 3×3 is 20 (half turns), proven in 2010." },
+  4: { math: '|G₄| ≈ 7.4 × 10⁴⁵', fact: "God's number for the 4×4 is not known." },
+  5: { math: '|G₅| ≈ 2.8 × 10⁷⁴', fact: "God's number for the 5×5 is not known." },
 };
 
-const GROUP_SIZE_MATH = {
-  2: "|G₂| ≈ 3.7 × 10⁶",
-  3: "|G₃| ≈ 4.3 × 10¹⁹",
-  4: "|G₄| ≈ 7.4 × 10⁴⁵",
-  5: "|G₅| ≈ 2.8 × 10⁷⁴",
-};
+const lcm = (a, b) => { const g = (x, y) => (y ? g(y, x % y) : x); return (a / g(a, b)) * b; };
 
-const GROUP_SIZE_DESCS = {
-  2: "The 2×2 has 3,674,160 reachable states — just 8 corners, no edges or centers. God's Number is 11 moves (HTM). Small enough that the full state space can be traversed in seconds.",
-  3: "The 3×3 has 43 quintillion reachable states. Despite this, any scramble can be solved in ≤20 moves (God's Number, proven 2010). The group is a highly constrained subgroup of S₅₄.",
-  4: "The 4×4 has ≈7.4 × 10⁴⁵ states — vastly more than the 3×3. God's Number is estimated ≈35 moves. The group includes centers and 'wing' edges that don't exist in the 3×3.",
-  5: "The 5×5 has ≈2.8 × 10⁷⁴ states. God's Number is estimated ≈46 moves. Its group includes three layers of center pieces per axis and 'wing' edge pairs, making it exponentially larger than the 3×3.",
-};
-
-const STICKER_COUNTS = { 2: 24, 3: 54, 4: 96, 5: 150 };
-const PIECE_COUNTS = {
-  2: "8 corners, 0 edges, 0 centers",
-  3: "8 corners, 12 edges, 6 centers",
-  4: "8 corners, 24 wings, 24 centers",
-  5: "8 corners, 24 wings, 24 + 9 centers",
-};
+/** Apply one turn's cycles to a permutation (perm[i] = where the sticker now at i started) */
+function composeTurn(model, perm, turn) {
+  const next = [...perm];
+  for (const cyc of model.turnCycles(turn)) {
+    for (let k = 0; k < cyc.length; k++) next[cyc[(k + 1) % cyc.length]] = perm[cyc[k]];
+  }
+  return next;
+}
+const identity = (n) => Array.from({ length: n }, (_, i) => i);
+const formatCycles = (model, cycles) => cycles.map(c => `(${c.map(model.slotLabel).join(' ')})`).join('');
 
 /**
- * AlgebraPanel
+ * AlgebraPanel - the Groups view of the Math tab, for any puzzle.
  * Props:
- *   state: 6×N×N cube state
- *   size: N
+ *   model: puzzle model (lib/puzzles/models)
+ *   state: puzzle state
  *   moveHistory: quarter turns [{notation, face, layers, cw}, ...] since reset/scramble
  *   solvePath: every quarter turn since the last solved state (scramble + moves),
  *              which pins down the exact sticker permutation
- *   algorithmNote: { groupTheoryNote, algebraNote, order, refs } | null
+ *   algorithm: the algorithm selected in the Algorithms tab (cubes), or null
+ *   godsNumber: known God's number (puzzles whose group is enumerated), or null
  */
-export default function AlgebraPanel({ state, size = 3, moveHistory = [], solvePath = [], algorithmNote = null }) {
-  const N = size;
+export default function AlgebraPanel({ model, state, moveHistory = [], solvePath = [], algorithm = null, godsNumber = null }) {
+  const isCube = model.kind === 'cube';
+  const N = model.N;
+  const stickers = model.stickerCount;
 
   // Track which trace rows have their cycle string expanded
   const [expandedRows, setExpandedRows] = useState({});
@@ -57,9 +47,12 @@ export default function AlgebraPanel({ state, size = 3, moveHistory = [], solveP
 
   // ── Current permutation, exact: compose every turn since solved ───────
   // (Colors alone cannot tell identical stickers apart on big cubes.)
-  const perm   = useMemo(() => analyzeSequence(solvePath, N).perm, [solvePath, N]);
+  const perm   = useMemo(
+    () => solvePath.reduce((p, t) => composeTurn(model, p, t), identity(stickers)),
+    [solvePath, model, stickers],
+  );
   const cycles = useMemo(() => permToCycles(perm, true), [perm]);
-  const looksSolved = isSolved(state);
+  const looksSolved = model.isSolved(state);
 
   const movedCount = cycles.reduce((a, c) => a + c.length, 0);
   const cycleTypes = {};
@@ -69,170 +62,122 @@ export default function AlgebraPanel({ state, size = 3, moveHistory = [], solveP
     .map(([len, cnt]) => cnt > 1 ? `${cnt}×(${len}-cycle)` : `(${len}-cycle)`)
     .join(' ∘ ');
   const parity = cycles.reduce((s, c) => s + c.length - 1, 0) % 2 === 0 ? 'Even' : 'Odd';
+  const order = cycles.reduce((o, c) => lcm(o, c.length), 1);
+
+  const algOrder = useMemo(() => (algorithm && isCube ? algorithmOrder(algorithm, N) : null), [algorithm, isCube, N]);
+  // Order of a two-move sequence: R U on cubes, the first two axes elsewhere
+  const sample = isCube ? 'R U' : `${model.axes[0].name} ${model.axes[1].name}`;
+  const sampleOrder = useMemo(() => {
+    const p = model.parseMoveSequence(sample).reduce((acc, t) => composeTurn(model, acc, t), identity(stickers));
+    return permToCycles(p, true).reduce((o, c) => lcm(o, c.length), 1);
+  }, [model, sample, stickers]);
+  const size = isCube
+    ? GROUP_SIZES[N]
+    : { math: `|G| = ${model.groupOrder}`, fact: godsNumber != null ? `God's number is ${godsNumber}, found by visiting every position.` : 'Counting every position…' };
 
   // ── Janet Chen trace: accumulate permutation step-by-step ─────────────
-  // Each entry: {notation, moveCycles, cumCycles, cumParity}
   const trace = useMemo(() => {
-    if (moveHistory.length === 0) return [];
-    const nn = N * N;
-    const total = 6 * nn;
-    let perm = Array.from({ length: total }, (_, i) => i);
-    const result = [];
-
+    const rows = [];
+    let p = identity(stickers);
     for (const turn of moveHistory) {
-      const { notation } = turn;
-      const moveCycles = getTurnPositionCycles(turn, N);
-      const newPerm = [...perm];
-      moveCycles.forEach(([a, b, c, d]) => {
-        newPerm[b] = perm[a];
-        newPerm[c] = perm[b];
-        newPerm[d] = perm[c];
-        newPerm[a] = perm[d];
-      });
-      perm = newPerm;
-      // Decompose current cumulative perm into cycles
-      const visited = new Uint8Array(total);
-      const cumCycles = [];
-      for (let s = 0; s < total; s++) {
-        if (visited[s] || perm[s] === s) { visited[s] = 1; continue; }
-        const cycle = [];
-        let cur = s;
-        while (!visited[cur]) {
-          visited[cur] = 1;
-          cycle.push(cur);
-          cur = perm[cur];
-        }
-        if (cycle.length > 1) cumCycles.push(cycle);
-      }
-      const cumParity = cumCycles.reduce((s, c) => s + c.length - 1, 0) % 2 === 0 ? 'even' : 'odd';
-
-      // Format move's own cycles (just the 4-cycles for this move)
-      const moveCycleStr = formatCycles(moveCycles.slice(0, 3), N) +
-        (moveCycles.length > 3 ? `···+${moveCycles.length-3}` : '');
-
-      const cumCycleStrFull = formatCycles(cumCycles, N);
-      result.push({
-        notation,
-        moveCycleStr,
-        cumCycleStr: formatCycles(cumCycles.slice(0, 4), N) +
-          (cumCycles.length > 4 ? ` ···+${cumCycles.length-4}` : ''),
-        cumCycleStrFull,
-        cumParity,
+      p = composeTurn(model, p, turn);
+      const cumCycles = permToCycles(p, true);
+      rows.push({
+        notation: turn.notation,
+        cumCycleStr: formatCycles(model, cumCycles.slice(0, 4)) +
+          (cumCycles.length > 4 ? ` ···+${cumCycles.length - 4}` : ''),
+        cumCycleStrFull: formatCycles(model, cumCycles),
+        cumParity: cumCycles.reduce((acc, c) => acc + c.length - 1, 0) % 2 === 0 ? 'even' : 'odd',
         cumCycleCount: cumCycles.length,
-        cumMovedCount: cumCycles.reduce((s, c) => s + c.length, 0),
         hasMore: cumCycles.length > 4,
       });
     }
-    return result;
-  }, [moveHistory, N]);
+    return rows;
+  }, [moveHistory, model, stickers]);
 
   return (
-    <div className="algebra-panel">
-      <h3 className="panel-title"><span className="icon">σ</span> Abstract Algebra</h3>
-
-      {/* ── Big picture intro ── */}
-      <div className="algebra-intro-card">
-        <div className="aic-title">Why is the Rubik's Cube a math object?</div>
-        <p className="aic-body">
-          A <strong>group</strong> is a set of elements with a composition rule (like multiplication)
-          that satisfies four axioms: closure, associativity, identity, and inverses. The set of all
-          legal cube states — about 43 quintillion — forms exactly such a group under move composition.
-          Every face turn is a <em>group element</em>; applying two moves is <em>group multiplication</em>;
-          and undoing a move is taking its <em>inverse</em>.
-        </p>
-        <p className="aic-body">
-          Because every move just shuffles the 54 colored stickers around, each group element is
-          a <em>permutation</em>. The cube group is therefore a subgroup of S₅₄ — the symmetric group
-          on 54 elements — but a very constrained one: not every shuffle of 54 stickers is reachable
-          by legal moves. The stats below show the permutation structure of your current state live.
-        </p>
-      </div>
-
-      {/* ── Plain-English glossary ── */}
-      <div className="algebra-section">
-        <div className="section-label">What do these terms mean?</div>
-        <div className="glossary-grid">
-          <GlossaryCard
-            term="Sticker"
-            color="var(--accent2)"
-            plain={`Each colored square on the cube. A 3×3 has 54 stickers (9 per face × 6 faces). When you make a move, stickers change position — group theory tracks exactly which sticker goes where.`}
-          />
-          <GlossaryCard
-            term="Cycle"
-            color="#fbbf24"
-            plain={`A "rotation ring" of stickers. If R moves sticker A→B, B→C, C→D, D→A, that's a 4-cycle: every sticker in the ring takes the next one's spot. One face turn creates several such rings simultaneously.`}
-          />
-          <GlossaryCard
-            term="Parity"
-            color="#6ee7b7"
-            plain={`Any shuffle can be broken into two-sticker swaps. If you need an even number of swaps, the permutation is even (parity = even); odd number of swaps → odd parity. On a 3×3 every quarter turn is odd on the 54 stickers, so sticker parity just counts quarter turns. The real constraint is on pieces: the corner and edge permutations always have the same parity, which is why you can't swap just two edges.`}
-          />
-        </div>
-      </div>
-
-      {/* ── Current state summary ── */}
-      <div className="algebra-section">
-        <div className="section-label">Current position — live stats</div>
+    <div className="panel-stack">
+      {/* ── Live position ── */}
+      <Section
+        title="Your position"
+        caption="The exact sticker permutation since solved."
+        why={<>
+          <p>
+            A <strong>group</strong> is a set with a way to combine elements that is associative,
+            has an identity and has inverses. Cube positions form one: a turn is an element,
+            doing two turns is multiplication, and undoing a turn is its inverse.
+          </p>
+          <p>
+            Every turn shuffles the {stickers} stickers, so every position is a
+            <strong> permutation</strong>. A <em>cycle</em> is a ring of stickers that each take the
+            next one&apos;s place; <em>parity</em> is whether the permutation is an even or odd
+            number of swaps; the <em>order</em> is how often you could repeat it before returning to start.
+          </p>
+        </>}
+      >
         <div className="algebra-stat-row">
-          <StatChip
-            label="Stickers moved"
-            tooltip={`How many of the ${6 * N * N} stickers are not in their starting position (tracked exactly through every turn)`}
-            value={movedCount}
-          />
-          <StatChip
-            label="Parity"
-            tooltip="Parity of the sticker permutation. A quarter turn's parity is (−1)^(number of its 4-cycles)."
-            value={parity}
-            color={parity === 'Even' ? '#6ee7b7' : '#f87171'}
-          />
-          <StatChip
-            label="Disjoint cycles"
-            tooltip="How many independent rotation rings exist in the current permutation"
-            value={cycles.length}
-          />
+          <StatChip label="Moved" tooltip={`Stickers not in their starting position, out of ${stickers}`} value={movedCount} />
+          <StatChip label="Cycles" tooltip="Disjoint cycles in the permutation" value={cycles.length} />
+          <StatChip label="Parity" tooltip="Even or odd number of swaps" value={parity}
+            color={parity === 'Even' ? '#6ee7b7' : '#f87171'} />
+          <StatChip label="Order" tooltip="Repeat this permutation this often to return to the start" value={order} />
         </div>
-        {cycleTypeStr && (
-          <div className="cycle-type-str">
-            <span className="math-mono">σ = {cycleTypeStr || 'id'}</span>
-            <span className="cycle-type-plain"> — the cycle structure of the current permutation</span>
-          </div>
-        )}
-        {cycles.length === 0 && (
-          <div className="solved-note">✓ Identity element — every sticker is home. Cube is solved.</div>
-        )}
+        {cycles.length > 0 && <div className="cycle-type-str math-mono">σ = {cycleTypeStr}</div>}
+        {cycles.length === 0 && <div className="solved-note">✓ Identity: every sticker is home.</div>}
         {cycles.length > 0 && looksSolved && (
           <div className="solved-note">
-            ✓ Looks solved, yet {movedCount} stickers sit in other positions of the same color.
-            This is not the identity: it is an element of the stabilizer of the solved coloring,
-            such as a whole-cube rotation or identical-looking stickers trading places.
+            ✓ Looks solved, but {movedCount} stickers traded places with same-colored ones:
+            a non-identity element that fixes the coloring.
           </div>
         )}
-      </div>
+      </Section>
+
+      {/* ── Selected algorithm ── */}
+      {algorithm && algOrder && (
+        <Section
+          title={algorithm.name}
+          caption={algorithm.algebraNote || algorithm.notation}
+          why={<>
+            {algorithm.groupTheoryNote && <p>{algorithm.groupTheoryNote}</p>}
+            {algorithm.refs?.length > 0 && (
+              <p className="refs">
+                {algorithm.refs.map((ref, i) => (
+                  <span key={i}>
+                    {ref.url ? <a href={ref.url} target="_blank" rel="noreferrer">{ref.label}</a> : ref.label}
+                    {i < algorithm.refs.length - 1 ? ' · ' : ''}
+                  </span>
+                ))}
+              </p>
+            )}
+          </>}
+        >
+          <div className="algebra-stat-row">
+            <StatChip label="Order" tooltip="Repetitions until every sticker is home" value={algOrder.order} />
+            {algOrder.looksSolvedAfter !== algOrder.order && (
+              <StatChip label="Looks solved after" tooltip="Repetitions until the colors match again"
+                value={algOrder.looksSolvedAfter} />
+            )}
+          </div>
+        </Section>
+      )}
 
       {/* ── Janet Chen permutation trace ── */}
       {trace.length > 0 && (
-        <div className="algebra-section">
-          <div className="section-label" style={{display:'flex',alignItems:'center',justifyContent:'space-between'}}>
-            <span style={{ flex: 1 }}>Move-by-move permutation trace</span>
-            <PermTraceToggle />
-          </div>
-          <div className="diagram-note" style={{marginBottom: '8px'}}>
-            Following <strong>Janet Chen's approach</strong>: each face move is a permutation σ on
-            the 54 stickers. Compose them left-to-right and watch the group element evolve.
-            Labels like <span className="math-mono">U12</span> = face U, row 1, col 2.
-            A 4-cycle <span className="math-mono">(a b c d)</span> means a→b→c→d→a.
-            {' '}<em>A quarter turn's sticker parity is (−1)^(number of its 4-cycles); the Graph Theory tab breaks this down per orbit.</em>
-          </div>
+        <Section
+          title="Move trace"
+          caption="Each turn composed into the running permutation."
+          why={<PermTraceExplainer stickers={stickers} />}
+        >
           <div className="perm-trace">
             <div className="perm-trace-row perm-trace-header">
               <span className="pt-move">Move</span>
-              <span className="pt-cycles">Cumulative cycles</span>
-              <span className="pt-meta"># cycles</span>
+              <span className="pt-cycles">Cycles</span>
+              <span className="pt-meta">#</span>
               <span className="pt-parity">Parity</span>
             </div>
             <div className="perm-trace-row perm-trace-identity">
               <span className="pt-move">start</span>
-              <span className="pt-cycles math-mono">identity (solved)</span>
+              <span className="pt-cycles math-mono">identity</span>
               <span className="pt-meta">0</span>
               <span className="pt-parity even">even</span>
             </div>
@@ -266,93 +211,56 @@ export default function AlgebraPanel({ state, size = 3, moveHistory = [], solveP
               );
             })}
           </div>
-          <div className="diagram-note" style={{marginTop:'6px'}}>
-            This is Janet Chen's approach: represent each face move as a permutation on the 54 stickers, then compose them left-to-right to see the evolving group element.
-          </div>
-        </div>
-      )}
-
-      {/* ── Algorithm-specific note ── */}
-      {algorithmNote && (
-        <div className="algebra-section alg-note">
-          {algorithmNote.algebraNote && (
-            <div className="math-notation">{algorithmNote.algebraNote}</div>
-          )}
-          {algorithmNote.order && (
-            <div className="order-badge">Order: {algorithmNote.order}</div>
-          )}
-          {algorithmNote.groupTheoryNote && (
-            <p className="theory-text">{algorithmNote.groupTheoryNote}</p>
-          )}
-          {algorithmNote.refs && algorithmNote.refs.length > 0 && (
-            <div className="refs">
-              <span className="refs-label">Refs: </span>
-              {algorithmNote.refs.map((ref, i) => (
-                <span key={i}>
-                  {ref.url
-                    ? <a href={ref.url} target="_blank" rel="noreferrer">{ref.label}</a>
-                    : <span className="ref-inline">{ref.label}</span>}
-                  {i < algorithmNote.refs.length - 1 ? ' · ' : ''}
-                </span>
-              ))}
-            </div>
-          )}
-        </div>
+        </Section>
       )}
 
       {/* ── Cycle chord diagram ── */}
-      <div className="algebra-section">
-        <div className="section-label">Cycle chord diagram — permutation visualised</div>
-        <div className="diagram-note" style={{marginBottom: 8}}>
-          Each dot is one of the {6 * N * N} sticker positions ({PIECE_COUNTS[N] || `6×${N}² = ${6*N*N} stickers`}),
-          arranged in 6 face groups around a circle.
-          Arcs connect positions that form a cycle — same color arc = same cycle.
-          The identity (solved state) shows no arcs.
-        </div>
-        <CycleChordDiagram cycles={cycles} N={N} />
-      </div>
+      <Section
+        title="Cycle diagram"
+        caption="Arcs join stickers in the same cycle."
+        why={<p>
+          All {stickers} sticker positions sit on a circle, grouped by face. Each cycle of the
+          current permutation is drawn in its own color; a solved cube shows no arcs.
+        </p>}
+      >
+        <CycleChordDiagram cycles={cycles} model={model} />
+      </Section>
 
-      {/* ── Piece orbit diagram ── */}
-      <div className="algebra-section">
-        <div className="section-label">Piece orbit diagram — corners &amp; edges</div>
-        <div className="diagram-note" style={{marginBottom: 8}}>
-          The cube group has two independent orbits: the <strong>8 corners</strong> (outer ring) and
-          the <strong>12 edges</strong> (inner ring). Each node shows the sticker colors of the piece
-          currently in that slot. A colored outline means the piece is out of place.
-        </div>
-        <PieceOrbitDiagram state={state} N={N} />
-      </div>
+      {/* ── Piece orbit diagram (3×3) ── */}
+      {isCube && N === 3 && (
+        <Section
+          title="Pieces"
+          caption="Corners outside, edges inside; orange rings are out of place."
+          why={<p>
+            Corners can only go to corner slots and edges to edge slots: they are separate
+            orbits of the group. Each node shows the colors of the piece currently in that slot.
+          </p>}
+        >
+          <PieceOrbitDiagram state={state} N={N} />
+        </Section>
+      )}
 
       {/* ── Key concepts ── */}
-      <div className="algebra-section concepts">
-        <div className="section-label">Group Theory toolkit</div>
-        <div className="concept-grid">
-          <ConceptCard
-            title="Commutator"
-            math="[A,B] = ABA⁻¹B⁻¹"
-            desc="Do move A, then B, then undo A, then undo B. If A and B don't commute, you get a small, targeted change. Most cube algorithms are commutators — they isolate the effect to just a few pieces."
-            footnote="Chen §5"
-          />
-          <ConceptCard
-            title="Conjugate"
-            math="ABA⁻¹"
-            desc="Setup with A, apply algorithm B, undo the setup. This 'teleports' B's effect to a new location without moving everything else. Think of it as repositioning before striking."
-            footnote="Chen §4"
-          />
-          <ConceptCard
-            title="Order"
-            math="|g| = min k : gᵏ = identity"
-            desc={ORDER_DESCS[N] || ORDER_DESCS[3]}
-            footnote="Lagrange's theorem"
-          />
-          <ConceptCard
-            title={`Group size  |G${N > 3 ? N : '₃'}|`}
-            math={GROUP_SIZE_MATH[N] || GROUP_SIZE_MATH[3]}
-            desc={GROUP_SIZE_DESCS[N] || GROUP_SIZE_DESCS[3]}
-            footnote="cube20.org"
-          />
-        </div>
-      </div>
+      <Section
+        title="Toolkit"
+        why={<p>
+          Commutators and conjugates are how cubers build algorithms: a commutator confines
+          the change to the pieces A and B share, and a conjugate moves that change to where
+          it is needed. The order of an element divides the order of the group (Lagrange).
+        </p>}
+      >
+        {(open) => (
+          <div className="concept-grid">
+            <ConceptCard open={open} title="Commutator" math="[A, B] = A B A⁻¹ B⁻¹"
+              desc="Do A, do B, undo A, undo B. Only the pieces both moves touch change." />
+            <ConceptCard open={open} title="Conjugate" math="A B A⁻¹"
+              desc="Set up with A, do B, undo the setup: B's effect, moved somewhere else." />
+            <ConceptCard open={open} title="Order" math={`|${sample}| = ${sampleOrder}`}
+              desc={`Repeat ${sample} ${sampleOrder} times and every sticker is home again.`} />
+            <ConceptCard open={open} title="Group size" math={size.math} desc={size.fact} />
+          </div>
+        )}
+      </Section>
     </div>
   );
 }
@@ -366,75 +274,71 @@ const CYCLE_PALETTE   = [
   '#6ee7b7','#f87171','#a78bfa','#fbbf24','#60a5fa',
 ];
 
-function CycleChordDiagram({ cycles, N }) {
-  const total = 54; // always 6×3×3 for display purposes — works for all N but scaled
+function CycleChordDiagram({ cycles, model }) {
+  const total = model.stickerCount;
+  const faces = model.faceNames.length;
   const R = 88, cx = 110, cy = 110;
-  const r = 5; // dot radius
+  // Dots shrink with the sticker count so neighbours never overlap
+  const r = Math.min(5, (Math.PI * R) / total * 0.8);
+  const gapPerFace = 0.08; // radians of empty space between face groups
 
-  // Position of index i on the circle
-  const pos = (i, total) => {
-    const angle = (2 * Math.PI * i / total) - Math.PI / 2;
+  // Slots grouped by face, each face an arc of the circle
+  const { faceOf, indexOnFace, perFace } = useMemo(() => {
+    const fo = [], io = [], pf = new Array(faces).fill(0);
+    for (let i = 0; i < total; i++) { const f = model.slotFace(i); fo.push(f); io.push(pf[f]++); }
+    return { faceOf: fo, indexOnFace: io, perFace: pf };
+  }, [model, total, faces]);
+  const pos = (i) => {
+    const f = faceOf[i];
+    const span = (2 * Math.PI) / faces - gapPerFace;
+    const angle = f * (2 * Math.PI / faces) + gapPerFace / 2 + (span * (indexOnFace[i] + 0.5)) / perFace[f] - Math.PI / 2;
     return { x: cx + R * Math.cos(angle), y: cy + R * Math.sin(angle) };
   };
+  const facePole = (f) => {
+    const angle = f * (2 * Math.PI / faces) + Math.PI / faces - Math.PI / 2;
+    return { x: cx + R * 1.22 * Math.cos(angle), y: cy + R * 1.22 * Math.sin(angle) };
+  };
 
-  // Build dot colors by face group
-  const dotColors = Array.from({ length: total }, (_, i) => {
-    const face = Math.floor(i / 9);
-    return FACE_COLORS_HEX[face] || '#888';
-  });
-
-  // Build arcs for each cycle
+  const inCycle = new Uint8Array(total);
   const arcs = [];
-  cycles.slice(0, 20).forEach((cycle, ci) => {
+  cycles.slice(0, 40).forEach((cycle, ci) => {
     const color = CYCLE_PALETTE[ci % CYCLE_PALETTE.length];
-    // Only draw arcs for indices that fit in our 54-position display
-    const mapped = cycle.map(idx => Math.round(idx * total / (N * N * 6)));
-    for (let i = 0; i < mapped.length; i++) {
-      const a = mapped[i], b = mapped[(i + 1) % mapped.length];
-      if (a >= total || b >= total) continue;
-      const pa = pos(a, total), pb = pos(b, total);
-      // Quadratic bezier pulling toward center
-      const mx = (pa.x + pb.x) / 2, my = (pa.y + pb.y) / 2;
-      const pull = 0.45;
-      const qx = cx + (mx - cx) * pull, qy = cy + (my - cy) * pull;
-      arcs.push(<path key={`a${ci}-${i}`}
-        d={`M${pa.x.toFixed(1)},${pa.y.toFixed(1)} Q${qx.toFixed(1)},${qy.toFixed(1)} ${pb.x.toFixed(1)},${pb.y.toFixed(1)}`}
-        fill="none" stroke={color} strokeWidth="1.2" strokeOpacity="0.75"
-      />);
-    }
+    cycle.forEach((a, k) => {
+      const b = cycle[(k + 1) % cycle.length];
+      const pa = pos(a), pb = pos(b);
+      // Quadratic bezier pulled toward the center
+      const qx = cx + ((pa.x + pb.x) / 2 - cx) * 0.45, qy = cy + ((pa.y + pb.y) / 2 - cy) * 0.45;
+      arcs.push(
+        <path key={`a${ci}-${k}`}
+          d={`M${pa.x.toFixed(1)},${pa.y.toFixed(1)} Q${qx.toFixed(1)},${qy.toFixed(1)} ${pb.x.toFixed(1)},${pb.y.toFixed(1)}`}
+          fill="none" stroke={color} strokeWidth="1.2" strokeOpacity="0.75" />,
+      );
+    });
   });
+  cycles.forEach(c => c.forEach(i => { inCycle[i] = 1; }));
 
   return (
-    <svg width="220" height="220" style={{ display: 'block', margin: '0 auto' }}>
-      {/* Face group labels */}
-      {['U','R','F','D','L','B'].map((f, fi) => {
-        const midIdx = fi * 9 + 4;
-        const { x, y } = pos(midIdx, total);
-        const lx = cx + (x - cx) * 1.25, ly = cy + (y - cy) * 1.25;
-        return <text key={f} x={lx} y={ly + 3} textAnchor="middle"
-          fontSize="9" fill={FACE_COLORS_HEX[fi]} fontWeight="bold">{f}</text>;
-      })}
-      {/* Arcs */}
-      {arcs}
-      {/* Dots */}
-      {Array.from({ length: total }, (_, i) => {
-        const { x, y } = pos(i, total);
-        const inCycle = cycles.some(c => {
-          // Map cycle indices back approximately
-          return c.some(ci => Math.round(ci * total / (N * N * 6)) === i);
-        });
+    <svg viewBox="0 0 220 220" width="220" height="220" style={{ display: 'block', margin: '0 auto' }}>
+      {model.faceNames.map((name, f) => {
+        const { x, y } = facePole(f);
         return (
-          <circle key={i} cx={x} cy={y} r={r}
-            fill={dotColors[i]}
-            stroke={inCycle ? '#fff' : '#333'}
-            strokeWidth={inCycle ? 1.2 : 0.5}
-            opacity={inCycle ? 1 : 0.45}
-          />
+          <text key={name} x={x} y={y + 3} textAnchor="middle"
+            fontSize={name.length > 1 ? 7 : 9} fill={model.colors[f]} fontWeight="bold">{name}</text>
         );
       })}
-      {/* Center label */}
-      <text x={cx} y={cy - 6} textAnchor="middle" fontSize="10" fill="#7a7060">σ</text>
-      <text x={cx} y={cy + 8} textAnchor="middle" fontSize="8" fill="#7a7060">
+      {arcs}
+      {Array.from({ length: total }, (_, i) => {
+        const { x, y } = pos(i);
+        return (
+          <circle key={i} cx={x} cy={y} r={r}
+            fill={model.colors[faceOf[i]]}
+            stroke={inCycle[i] ? '#fff' : '#333'}
+            strokeWidth={inCycle[i] ? 1 : 0.4}
+            opacity={inCycle[i] ? 1 : 0.45} />
+        );
+      })}
+      <text x={cx} y={cy - 4} textAnchor="middle" fontSize="10" fill="#7a7060">σ</text>
+      <text x={cx} y={cy + 9} textAnchor="middle" fontSize="8" fill="#7a7060">
         {cycles.length === 0 ? 'identity' : `${cycles.length} cycles`}
       </text>
     </svg>
@@ -513,10 +417,6 @@ function PieceOrbitDiagram({ state, N }) {
       <circle cx={cxS} cy={cyS} r={Rc} fill="none" stroke="#2a2a2a" strokeWidth="1" />
       <circle cx={cxS} cy={cyS} r={Re} fill="none" stroke="#2a2a2a" strokeWidth="1" />
 
-      {/* Ring labels */}
-      <text x={cxS} y={cyS - Re + 14} textAnchor="middle" fontSize="8" fill="#7a7060">edges (12)</text>
-      <text x={cxS} y={cyS + 5} textAnchor="middle" fontSize="8" fill="#7a7060">corners (8)</text>
-      <text x={cxS} y={cyS + 16} textAnchor="middle" fontSize="8" fill="#7a7060">outer ring</text>
 
       {/* Corners */}
       {CORNERS_3.map((corner, i) => {
@@ -583,96 +483,24 @@ function PieceOrbitDiagram({ state, N }) {
 
 // ── Permutation Trace "How it works" toggle ─────────────────────────────────
 
-function PermTraceToggle() {
-  const [open, setOpen] = useState(false);
+
+function PermTraceExplainer({ stickers }) {
   return (
-    <span>
-      <button
-        className="pt-explain-btn"
-        onClick={() => setOpen(o => !o)}
-        title="How is this constructed?"
-      >
-        {open ? '▲ Hide' : '? How this works'}
-      </button>
-      {open && <PermTraceExplainer />}
-    </span>
+    <>
+      <p>
+        Sticker slots are numbered face by face, and labels like
+        <span className="math-mono"> U12</span> name a face and a slot on it. A turn is a
+        permutation σ of the {stickers} slots: it moves stickers in rings, written
+        <span className="math-mono"> (a b c)</span> for a→b→c→a.
+      </p>
+      <p>
+        Each row composes one more turn into the running product σ₁·σ₂·…·σₖ (first σ₁, then σ₂).
+        A k-cycle is k−1 swaps, so parity is even or odd by the total count.
+      </p>
+    </>
   );
 }
 
-function PermTraceExplainer() {
-  return (
-    <div className="pt-explainer">
-      <div className="pte-title">How the permutation trace is built</div>
-
-      <div className="pte-section">
-        <div className="pte-label">① State representation</div>
-        <p className="pte-body">
-          The cube is stored as a <strong>6 × N × N array</strong>. Each cell holds a color
-          index 0–5 (U=0 white, R=1 red, F=2 green, D=3 yellow, L=4 orange, B=5 blue).
-          A sticker at face <em>f</em>, row <em>r</em>, column <em>c</em> gets a flat index:
-        </p>
-        <div className="pte-formula">idx = f·N² + r·N + c</div>
-        <p className="pte-body">
-          Labels like <span className="math-mono">U12</span> mean face U (f=0), row 1, col 2 → idx = 0·9 + 1·3 + 2 = 5.
-          For a 3×3, there are 54 such positions (6 × 9).
-        </p>
-      </div>
-
-      <div className="pte-section">
-        <div className="pte-label">② A move as a permutation</div>
-        <p className="pte-body">
-          A face turn (say R) physically moves stickers around. We can represent it as a
-          function σ : {'{0…53}'} → {'{0…53}'} where σ(i) = j means "the sticker currently
-          at position i goes to position j." Since face turns always cycle stickers in groups
-          of 4, σ decomposes into <strong>4-cycles</strong>:
-        </p>
-        <div className="pte-formula">(i₀ i₁ i₂ i₃) means i₀→i₁, i₁→i₂, i₂→i₃, i₃→i₀</div>
-        <p className="pte-body">
-          A single 3×3 R move creates 5 such 4-cycles: 2 on the R face itself (its 4 corner
-          stickers and its 4 edge stickers) and 3 around the belt, one for each column of
-          stickers on U, F, D and B.
-        </p>
-      </div>
-
-      <div className="pte-section">
-        <div className="pte-label">③ Composition = multiplication</div>
-        <p className="pte-body">
-          When you apply two moves A then B, the combined effect is the permutation
-          <strong> B∘A</strong> (first A, then B). In the table, we track the running
-          product left-to-right:
-        </p>
-        <div className="pte-formula">σ_total = σ₁ · σ₂ · … · σₖ</div>
-        <p className="pte-body">
-          Each new move's cycles are "merged" into the total via function composition:
-          the new permutation maps position i to wherever A's output ends up after B
-          acts on it. The table shows this evolving product after each move.
-        </p>
-      </div>
-
-      <div className="pte-section">
-        <div className="pte-label">④ Parity</div>
-        <p className="pte-body">
-          Any permutation can be decomposed into <strong>transpositions</strong> (2-swaps).
-          A k-cycle requires k−1 transpositions. Add up all k−1 for every cycle in σ_total:
-          if the sum is even → <span style={{color:'#6ee7b7'}}>even parity</span>; odd →
-          <span style={{color:'#f87171'}}> odd parity</span>. Every 3×3 quarter turn is five
-          4-cycles, so it is odd on stickers. The constraint that survives is on pieces: the
-          corner and edge permutations always have equal parity, which is why you can't swap
-          just two corners without affecting anything else.
-        </p>
-      </div>
-    </div>
-  );
-}
-
-function GlossaryCard({ term, color, plain }) {
-  return (
-    <div className="glossary-card">
-      <div className="glossary-term" style={{ color }}>{term}</div>
-      <div className="glossary-plain">{plain}</div>
-    </div>
-  );
-}
 
 function StatChip({ label, tooltip, value, color }) {
   return (
@@ -683,13 +511,12 @@ function StatChip({ label, tooltip, value, color }) {
   );
 }
 
-function ConceptCard({ title, math, desc, footnote }) {
+function ConceptCard({ title, math, desc, open }) {
   return (
     <div className="concept-card">
       <div className="concept-title">{title}</div>
       <div className="concept-math">{math}</div>
-      <div className="concept-desc">{desc}</div>
-      {footnote && <div className="concept-footnote">† {footnote}</div>}
+      {open && <div className="concept-desc">{desc}</div>}
     </div>
   );
 }

@@ -3,6 +3,7 @@
  * Each algorithm has: id, name, category, cubeSize, notation, description,
  * groupTheoryNote, algebraNote (commutator/conjugate form if applicable)
  */
+import { analyzeSequence, parseMoveSequence, applyTurn, isSolved, solvedState } from './cubeState';
 
 export const ALGORITHM_CATEGORIES = [
   'Beginner',
@@ -27,7 +28,6 @@ export const ALGORITHMS = [
     groupTheoryNote:
       'This is the commutator [R, U] = R U R⁻¹ U⁻¹. As an element of the Rubik group G, it has order 6.',
     algebraNote: 'Commutator: [R, U]',
-    order: 6,
   },
   {
     id: 'sledgehammer',
@@ -38,7 +38,6 @@ export const ALGORITHMS = [
     description: 'Inverse of the Sune-related setup. Used in many beginner approaches for corners.',
     groupTheoryNote: 'This is [R⁻¹, F] = R⁻¹ F R F⁻¹. Also order 6.',
     algebraNote: 'Commutator: [R⁻¹, F]',
-    order: 6,
   },
   {
     id: 'insert_corner',
@@ -50,7 +49,6 @@ export const ALGORITHMS = [
       'Inserts a corner from the top layer into the front-right slot. Inverse of the sexy move.',
     groupTheoryNote: 'U R U⁻¹ R⁻¹ = [U, R] = the sexy move\'s inverse.',
     algebraNote: 'Commutator: [U, R]',
-    order: 6,
   },
   {
     id: 'insert_edge_left',
@@ -61,7 +59,6 @@ export const ALGORITHMS = [
     description: 'Inserts an edge from the top layer into the front-left slot.',
     groupTheoryNote: null,
     algebraNote: null,
-    order: null,
   },
 
   // ─── F2L ──────────────────────────────────────────────────────────────────
@@ -76,7 +73,6 @@ export const ALGORITHMS = [
     groupTheoryNote:
       'This is [U, R], a 3-generator sequence. The commutator structure preserves the solved bottom layer.',
     algebraNote: '[U, R]',
-    order: 6,
   },
   {
     id: 'f2l_basic_left',
@@ -88,7 +84,6 @@ export const ALGORITHMS = [
       'Inserts a corner-edge pair into the left-front slot.',
     groupTheoryNote: "This is [U', L'] = [U⁻¹, L⁻¹].",
     algebraNote: "[U', L']",
-    order: 6,
   },
   {
     id: 'f2l_split',
@@ -100,7 +95,6 @@ export const ALGORITHMS = [
       'Handles F2L case where corner and edge are split (corner on top, edge in slot wrong).',
     groupTheoryNote: null,
     algebraNote: null,
-    order: null,
   },
 
   // ─── OLL ──────────────────────────────────────────────────────────────────
@@ -116,7 +110,6 @@ export const ALGORITHMS = [
     groupTheoryNote:
       'Diagonal corner twists cannot be separated from each other — twisting one corner clockwise forces another counterclockwise. This is why you always fix corners in pairs.',
     algebraNote: 'Cross OLL — 2 diagonal corner twists',
-    order: null,
   },
   {
     id: 'oll_pi',
@@ -129,7 +122,6 @@ export const ALGORITHMS = [
     groupTheoryNote:
       'The Pi case is a double Sune composed with a rotation. Its corner-twist pattern has an elegant symmetry: every corner is wrong, but opposite pairs cancel out.',
     algebraNote: 'Cross OLL — all corners twisted',
-    order: null,
   },
   {
     id: 'oll_sune',
@@ -140,9 +132,8 @@ export const ALGORITHMS = [
     description:
       'OLL #27. Orients 3 corners of the last layer. One of the most important last-layer algorithms.',
     groupTheoryNote:
-      'Sune can be written as R (U R\' U)² R⁻¹ U R\' which reveals its conjugate structure. It has order 7 when applied to the full cube but solves OLL in 1 application for the Sune case.',
-    algebraNote: 'Conjugate form visible: R [U R\' U R U² R\'] R⁻¹ effectively',
-    order: null,
+      'Sune is (R U R\' U)(R U2 R\'): it twists three top corners and cycles three top edges while restoring everything below. Six Sunes in a row return the cube to solved, so its order is 6.',
+    algebraNote: '(R U R\' U)(R U2 R\') — order 6',
   },
   {
     id: 'oll_antisune',
@@ -153,7 +144,6 @@ export const ALGORITHMS = [
     description: 'OLL #26. Inverse orientation of Sune. Orients 3 corners in the opposite cycle.',
     groupTheoryNote: "Anti-Sune is the inverse of Sune in the Rubik group.",
     algebraNote: 'Inverse of Sune',
-    order: null,
   },
   {
     id: 'oll_t',
@@ -165,7 +155,6 @@ export const ALGORITHMS = [
     groupTheoryNote:
       'F [R U R\' U\'] F\' = F · (commutator [R,U]) · F⁻¹ is a conjugation of [R,U] by F.',
     algebraNote: 'Conjugate: F · [R, U] · F⁻¹',
-    order: null,
   },
   // L-shape OLLs (2 adjacent edges oriented)
   {
@@ -179,7 +168,6 @@ export const ALGORITHMS = [
     groupTheoryNote:
       'This is a conjugate: F · [R U\' R\' U\' R U R\'] · F⁻¹. The inner part orients the corner, while F and F⁻¹ redirect which pieces are affected.',
     algebraNote: 'Conjugate: F · (corner sequence) · F⁻¹',
-    order: null,
   },
   {
     id: 'oll_33',
@@ -192,7 +180,6 @@ export const ALGORITHMS = [
     groupTheoryNote:
       'R U R\' U\' followed by R\' F R F\' is a product of two commutator-like structures. This is [R, U] · [R\', F].',
     algebraNote: '[R, U] · [R⁻¹, F] (product)',
-    order: null,
   },
   // Line OLLs (2 opposite edges oriented)
   {
@@ -206,7 +193,6 @@ export const ALGORITHMS = [
     groupTheoryNote:
       'F · (U R U\' R\') · F⁻¹ is a conjugate: the inner sequence [U, R] acts on corners, F redirects the effect to the last layer edges.',
     algebraNote: 'Conjugate: F · [U, R] · F⁻¹',
-    order: null,
   },
   {
     id: 'oll_dot',
@@ -217,7 +203,6 @@ export const ALGORITHMS = [
     description: 'OLL when no edges are oriented (dot case). Uses two conjugated commutators.',
     groupTheoryNote: 'Product of two conjugated commutators: F[R,U]F⁻¹ · f[R,U]f⁻¹.',
     algebraNote: 'Product of conjugates',
-    order: null,
   },
 
   // ─── PLL ──────────────────────────────────────────────────────────────────
@@ -230,9 +215,8 @@ export const ALGORITHMS = [
     description:
       'PLL T-permutation. Swaps two adjacent corners and two adjacent edges on the last layer.',
     groupTheoryNote:
-      'T-perm is a double transposition: swaps corners UFR↔UBR and edges UF↔UR. As an element of the PLL subgroup (≅ A₄ × ℤ₃₂ / ...), it has order 2.',
+      'T-perm is a double transposition: it swaps corners UFR↔UBR and edges UL↔UR. Each swap alone is odd; together they are even, and doing it twice is the identity (order 2).',
     algebraNote: 'Order 2 element (double transposition)',
-    order: 2,
   },
   {
     id: 'pll_u_cw',
@@ -244,7 +228,6 @@ export const ALGORITHMS = [
     groupTheoryNote:
       'U-perm is a 3-cycle in the symmetric group S₄ acting on the corners. It is an even permutation (product of two transpositions), hence lies in A₄.',
     algebraNote: '3-cycle (even permutation)',
-    order: 3,
   },
   {
     id: 'pll_u_ccw',
@@ -255,7 +238,6 @@ export const ALGORITHMS = [
     description: 'Cycles three edges counter-clockwise on the last layer.',
     groupTheoryNote: 'Inverse of the CW U-perm. Also a 3-cycle, order 3.',
     algebraNote: '3-cycle inverse',
-    order: 3,
   },
   {
     id: 'pll_y',
@@ -268,7 +250,6 @@ export const ALGORITHMS = [
     groupTheoryNote:
       'Y-perm swaps diagonal corners. Since diagonal corner swaps require an odd permutation of corners, Y-perm cannot be decomposed into pure edge or corner cycles without coupling.',
     algebraNote: 'Diagonal transpositions',
-    order: 2,
   },
 
   {
@@ -276,26 +257,24 @@ export const ALGORITHMS = [
     name: 'J-Perm A',
     category: 'PLL',
     cubeSize: [2, 3, 4, 5],
-    notation: "R' U L' U2 R U' R' U2 R L",
+    notation: "R' U L' U2 R U' R' U2 R L U'",
     description:
-      'Swaps two adjacent corners and two adjacent edges (in different positions from T-perm). One of the J-perm variants.',
+      'Swaps two adjacent corners and two adjacent edges on the top layer. One of the J-perm variants.',
     groupTheoryNote:
-      'J-perm A is a (2,2)-type permutation: two transpositions that together form an even permutation. Its order is 2.',
-    algebraNote: 'Even permutation — order 2',
-    order: 2,
+      'Two transpositions at once: one of corners, one of edges. Each swap alone is odd, but together they make an even permutation, which is why a legal cube can do it. Doing it twice is the identity: its order is 2.',
+    algebraNote: '(corner swap)(edge swap) — even, order 2',
   },
   {
     id: 'pll_r_a',
-    name: 'R-Perm A (3-corner cycle)',
+    name: 'R-Perm A',
     category: 'PLL',
     cubeSize: [2, 3, 4, 5],
-    notation: "R U' R' U' R U R D R' U' R D' R' U2 R'",
+    notation: "R U' R' U' R U R D R' U' R D' R' U2 R' U'",
     description:
-      'Cycles three corners clockwise while permuting adjacent edges. One of the most asymmetric PLLs.',
+      'Swaps two adjacent corners and two edges on the top layer.',
     groupTheoryNote:
-      'R-perm A is a 3-cycle on corners coupled with edge moves. As an element of the PLL subgroup (which is isomorphic to a subgroup of S₄ × S₄ factoring out orientation), it has order 3.',
-    algebraNote: '3-cycle + edge coupling, order 3',
-    order: 3,
+      'Like the J-perm, a corner swap paired with an edge swap: two odd transpositions whose product is even. Order 2.',
+    algebraNote: '(corner swap)(edge swap) — even, order 2',
   },
   {
     id: 'pll_aa',
@@ -308,7 +287,6 @@ export const ALGORITHMS = [
     groupTheoryNote:
       'A-perm is a pure 3-cycle on corners. Since a 3-cycle is an even permutation, it lies in the alternating group A₄ acting on the 4 U-layer corners.',
     algebraNote: 'Pure corner 3-cycle — even permutation, order 3',
-    order: 3,
   },
   {
     id: 'pll_ab',
@@ -321,7 +299,6 @@ export const ALGORITHMS = [
     groupTheoryNote:
       'Inverse of A-perm CW. Two applications of A-perm CW equal A-perm CCW (since order 3): (A_cw)² = A_ccw.',
     algebraNote: 'Inverse 3-cycle — order 3',
-    order: 3,
   },
 
   // ─── BIG CUBE ─────────────────────────────────────────────────────────────
@@ -336,7 +313,6 @@ export const ALGORITHMS = [
     groupTheoryNote:
       'An outer quarter turn moves the wings in two 4-cycles (even); an inner slice quarter turn moves them in one 4-cycle (odd). A single flipped edge means the wing permutation is odd, so no sequence of outer turns can fix it. This algorithm uses 9 inner-slice quarter turns, an odd number.',
     algebraNote: 'sign on the wings = (−1)⁹ = −1',
-    order: 2,
   },
   {
     id: 'pll_parity',
@@ -349,7 +325,6 @@ export const ALGORITHMS = [
     groupTheoryNote:
       'On a 3×3 the corner and edge permutations always have the same parity. After reducing a 4×4, the edge pairs can have the opposite parity to the corners, because identical-looking center pieces can hide an odd permutation. A 3×3 PLL cannot fix that; this algorithm changes the edge-pair parity while leaving the corners alone.',
     algebraNote: 'sign(edges) ≠ sign(corners) → fix with a hidden center swap',
-    order: 2,
   },
   {
     id: 'dedge_cycle',
@@ -362,7 +337,6 @@ export const ALGORITHMS = [
     groupTheoryNote:
       'A conjugate: Uw · (R U R\') · Uw⁻¹. The setup Uw moves the inner slice so R U R\' acts on a different set of wings; undoing the setup keeps the centers solved.',
     algebraNote: 'Conjugate: Uw · (R U R\') · Uw⁻¹',
-    order: null,
   },
 
   // ─── PATTERNS ─────────────────────────────────────────────────────────────
@@ -377,7 +351,6 @@ export const ALGORITHMS = [
     groupTheoryNote:
       'M², E², S² are all order-2 elements (they equal their own inverses). Their product generates the checkerboard: an element of order 2 in the center of the Rubik group\'s abelianization.',
     algebraNote: 'Product of order-2 elements',
-    order: 2,
   },
   {
     id: 'superflip',
@@ -388,9 +361,8 @@ export const ALGORITHMS = [
     description:
       'All 12 edges flipped in place, corners unchanged. The furthest position from solved: requires exactly 20 moves (God\'s Number proof).',
     groupTheoryNote:
-      'The superflip is the unique element of the Rubik group that flips all 12 edges without moving any piece. It lies in the center of the edge-flip subgroup (ℤ₂¹²). The God\'s Number proof showed no position requires more than 20 moves.',
-    algebraNote: 'Element of edge orientation subgroup ℤ₂¹²',
-    order: 2,
+      'The superflip flips all 12 edges in place and moves nothing else. It is in the center of the whole cube group: it commutes with every move. Edge flips must sum to an even number, so the edge-flip subgroup is ℤ₂¹¹. In 1995 the superflip was the first position proven to need 20 moves.',
+    algebraNote: 'Central element; lies in the edge-flip subgroup ℤ₂¹¹',
   },
   {
     id: 'six_spot',
@@ -399,11 +371,10 @@ export const ALGORITHMS = [
     cubeSize: [3],
     notation: "U D' R L' F B' U D'",
     description:
-      'Places each face\'s center color on the opposite face\'s center, creating 6 contrasting spots.',
+      'Gives every face an outer ring in another color around its own center: six contrasting spots.',
     groupTheoryNote:
-      'Six-spot is a product of opposite-face center transpositions. Centers form a subgroup isomorphic to ℤ₃ × ℤ₃ (rotations only) on the 3x3.',
+      'Each pair U D\', R L\', F B\' turns opposite faces in opposite directions. Relative to the centers, that is a middle-slice turn combined with a whole-cube rotation, so the pattern is really built from slice moves. Its order is 3.',
     algebraNote: null,
-    order: 6,
   },
 
   // ─── GROUP THEORY DEMOS ───────────────────────────────────────────────────
@@ -418,7 +389,6 @@ export const ALGORITHMS = [
     groupTheoryNote:
       'A commutator [A, B] = A B A⁻¹ B⁻¹ measures how much A and B fail to commute. For the Rubik group, commutators of face moves are typically 3-cycles or double-transpositions — the building blocks of all solving algorithms.',
     algebraNote: '[R, U] = R U R⁻¹ U⁻¹',
-    order: 6,
     refs: [
       { label: 'Janet Chen: Group Theory and the Rubik\'s Cube', url: null },
       { label: 'Singmaster notation (Wikipedia)', url: 'https://en.wikipedia.org/wiki/Rubik%27s_cube#Move_notation' },
@@ -435,7 +405,6 @@ export const ALGORITHMS = [
     groupTheoryNote:
       'Conjugation: A B A⁻¹ "transports" the action of B to a new position. If B = [R, U] affects front-right corner, then F B F⁻¹ affects whichever corner F moved there. This is the group-theoretic basis of the "setup move + algorithm + undo setup" technique.',
     algebraNote: 'Conjugate: F · [R, U] · F⁻¹',
-    order: null,
     refs: [
       { label: 'Janet Chen, §4: Conjugates', url: null },
       { label: 'Dummit & Foote, Abstract Algebra §3.3', url: null },
@@ -443,24 +412,39 @@ export const ALGORITHMS = [
   },
   {
     id: 'double_commutator',
-    name: 'Double Commutator (Pure 3-Cycle)',
+    name: 'Niklas (Pure Corner 3-Cycle)',
     category: 'Group Theory',
     cubeSize: [3, 4, 5],
-    notation: "R U2 R' U' R U2 L' U R' U' L",
+    notation: "R U' L' U R' U' L U",
     description:
-      'A pure 3-cycle of corners with no edge disturbance. Constructed as a double commutator [[R,U²],L].',
+      'Cycles three corners and touches nothing else. Repeat it three times and the cube is back where it started.',
     groupTheoryNote:
-      'Double commutators [[A,B],C] are powerful because they are even more localized than single commutators. For the 3x3 group, any pure corner 3-cycle can be expressed as a double commutator. This is related to the fact that the commutator subgroup [G,G] contains all 3-cycles (since 3-cycles are even permutations).',
-    algebraNote: '[[R, U²], L] — a double commutator',
-    order: 3,
-    refs: [
-      { label: 'Janet Chen: Commutator subgroups', url: null },
-      { label: 'Herstein: Abstract Algebra', url: null },
-    ],
+      'The Niklas is a commutator [R, U\' L\' U] whose second element is itself a conjugate: U\' L\' U is L\' moved to a different place. Commutators of moves that overlap in a single piece produce exactly this kind of small, pure 3-cycle; every 3-cycle is even, and 3-cycles generate the commutator subgroup of the cube group.',
+    algebraNote: '[R, U\' L\' U] — commutator with a conjugate',
   },
 ];
 
 /** Get algorithms applicable to a given cube size */
+const gcd = (a, b) => (b ? gcd(b, a % b) : a);
+
+/**
+ * Order of an algorithm as a group element on an N×N cube, computed from its
+ * sticker permutation (lcm of the cycle lengths), and how many repetitions
+ * it takes until the cube merely *looks* solved again (identical stickers on
+ * big cubes can trade places, so that can come sooner).
+ */
+export function algorithmOrder(alg, N) {
+  const turns = parseMoveSequence(alg.notation, N, { reduced: usesReducedNotation(alg) });
+  const order = analyzeSequence(turns, N).cycles.reduce((o, c) => (o / gcd(o, c.length)) * c.length, 1);
+  let st = solvedState(N);
+  let looksSolvedAfter = order;
+  for (let k = 1; k < order; k++) {
+    st = turns.reduce(applyTurn, st);
+    if (isSolved(st)) { looksSolvedAfter = k; break; }
+  }
+  return { order, looksSolvedAfter };
+}
+
 /**
  * 3×3 algorithms are written in 3×3 notation; on a big cube they run through
  * the reduction map (outer layers stay outer, the 3×3 middle slice becomes all

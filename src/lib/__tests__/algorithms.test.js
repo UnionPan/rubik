@@ -1,6 +1,7 @@
 import { describe, it, expect } from 'vitest';
-import { ALGORITHMS, usesReducedNotation } from '../algorithms';
+import { ALGORITHMS, usesReducedNotation, algorithmOrder } from '../algorithms';
 import { applyMoveSequence, parseMoveSequence, solvedState, FACE_NAMES } from '../cubeState';
+import { faceletsToCubie } from '../twophase';
 
 /** Stickers that differ from solved, as "U31:F" labels */
 function changed(st) {
@@ -50,5 +51,25 @@ describe('algorithm library', () => {
       const st = applyMoveSequence(solvedState(N), alg.notation, { reduced: true });
       expect(changed(st).length).toBeGreaterThanOrEqual(24);
     }
+  });
+
+  it('every PLL moves only some last-layer pieces (no hidden extra U turn)', () => {
+    for (const alg of ALGORITHMS.filter(a => a.category === 'PLL')) {
+      const c = faceletsToCubie(applyMoveSequence(solvedState(3), alg.notation).flat(2));
+      const moved = [...c.cp].filter((p, i) => p !== i).length + [...c.ep].filter((p, i) => p !== i).length;
+      const lower = [...c.cp].slice(4).every((p, i) => p === i + 4) && [...c.ep].slice(4).every((p, i) => p === i + 4);
+      expect(lower, `${alg.id} disturbs the first two layers`).toBe(true);
+      expect(moved, `${alg.id} moves ${moved} last-layer pieces`).toBeLessThanOrEqual(6);
+    }
+  });
+
+  it('computes orders from the permutation, including on big cubes', () => {
+    const alg = id => ALGORITHMS.find(a => a.id === id);
+    expect(algorithmOrder(alg('oll_sune'), 3).order).toBe(6);
+    expect(algorithmOrder(alg('pll_j_a'), 3).order).toBe(2);
+    expect(algorithmOrder(alg('double_commutator'), 3).order).toBe(3);
+    // On a 4×4 same-colored centers trade places: T-perm looks solved after 2, but its order is 4
+    expect(algorithmOrder(alg('pll_t'), 4)).toEqual({ order: 4, looksSolvedAfter: 2 });
+    expect(algorithmOrder({ notation: 'R U', category: 'Beginner' }, 2).order).toBe(15);
   });
 });
