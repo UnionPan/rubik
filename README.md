@@ -5,19 +5,22 @@ Turn a puzzle in 3D and watch the same move animate in lockstep on a colored gra
 
 ## Features
 
-- **Six puzzles.** Cubes from 2×2 to 5×5, the Ivy Cube (corner-turning, leaf-shaped centers) and the Skewb Diamond (an octahedron with the Skewb mechanism). Turn them with buttons, the keyboard, notation, or by dragging a sticker.
+- **Six puzzles.** Cubes from 2×2 to 5×5, the Ivy Cube (corner-turning, leaf-shaped centers) and the Skewb Diamond (an octahedron with the Skewb mechanism). Turn them with the pad under the puzzle, the keyboard, or by dragging a sticker.
 - **Facelet graph.** Every facelet is a vertex; a layer turn is a rigid rotation of a sphere, so facelets travel along circles, drawn as three families of loops (one per axis). The graph animates in lockstep with the cube from a shared clock.
-- **Group Theory tab.** The exact sticker permutation of the current position (tracked through every turn), its cycle structure and parity, and a move-by-move trace.
-- **Graph Theory tab.** The facelet graph as the Schreier graph of the cube group: its connected components are the orbits of the group, each of exactly 24 vertices, and the parity of every orbit is predicted by per-move sign characters.
-- **Algorithms tab with a pattern detector.** Detects the solve stage on every size (layer-by-layer on the 2×2, CFOP on the 3×3, reduction on the 4×4 and 5×5), matches the library algorithm that applies, tells you the setup turn, and explains OLL/PLL parity as broken 3×3 invariants.
-- **Solve tab.** Kociemba's two-phase algorithm, implemented from scratch, solving from the cube's state: directly on the 3×3, via a virtual 3×3 on the 2×2, and after reduction (with automatic parity fixes) on the 4×4 and 5×5. The Ivy Cube and Skewb Diamond are small enough to enumerate completely, so their solutions are optimal and the site shows their true God's numbers (8 and 10).
-- **Less text by default.** Every section shows its numbers and pictures; the explanations sit behind a "Why?" toggle, and the Explain switch opens them all at once.
+- **Math › Groups.** The exact sticker permutation of the current position, in a picture of its loops and one plain sentence; click any earlier move to see the position after it.
+- **Math › Graphs.** The facelet graph explained in three pictures: every sticker is a dot, a turn slides dots around loops, and dots that can reach each other form a family (an orbit).
+- **Algorithms tab with a pattern detector.** Every stage and category says what it means in plain words, and OLL and PLL cases show the standard top-view picture, computed from the algorithm itself.
+  It detects the solve stage on every size (layer-by-layer on the 2×2, CFOP on the 3×3, reduction on the 4×4 and 5×5), matches the library algorithm that applies, tells you the setup turn, and explains OLL/PLL parity as broken 3×3 invariants.
+- **Solve tab.** Kociemba's two-phase algorithm, implemented from scratch, solving from the cube's state: directly on the 3×3 and via a virtual 3×3 on the 2×2.
+  A scrambled 4×4 or 5×5 is solved by reduction, in stages you can play one at a time: centers (table-guided search, then generated 3-cycles), parity, edges (generated wing 3-cycles), then the 3×3.
+  The Ivy Cube and Skewb Diamond are small enough to enumerate completely, so their solutions are optimal and the site shows their true God's numbers (8 and 10).
+- **Less text by default.** Sections lead with pictures and short sentences; longer explanations sit behind a "Why?" toggle, and the Explain switch opens them all at once.
 - **Shareable links.** The URL always encodes the cube size, scramble and every move; the Share button copies it.
 - **Accessibility.** Keyboard turning, touch gestures, resizable panes, and instant turns when the system asks for reduced motion.
 
 ## Notation
 
-Typed moves and algorithms use WCA / SiGN notation.
+Algorithms and share links use WCA / SiGN notation.
 
 | Move | Meaning |
 |---|---|
@@ -57,11 +60,12 @@ src/
     CubeViewer3D.jsx         the cubes in 3D, turn animation, drag-to-turn
     PuzzleViewer3D.jsx       any geometry-engine puzzle in 3D
     FaceletGraph.jsx         the synchronized sticker graph (SVG), for every puzzle
-    AlgebraPanel.jsx         Math › Groups: exact permutation stats and move trace
-    GraphTheoryPanel.jsx     Math › Graphs for cubes: orbits, parity characters
-    GenericGraphsPanel.jsx   Math › Graphs for other puzzles, with the full Cayley graph
+    TurnPad.jsx              turn buttons, direction, layer, speed and keyboard help
+    AlgebraPanel.jsx         Math › Groups: the position's loops, move by move
+    GraphsPanel.jsx          Math › Graphs: the facelet graph in pictures, families, every position
     AlgorithmPanel.jsx       algorithm library with a stepper, and the pattern detector
-    SolverPanel.jsx          two-phase solver UI and reduction guide (cubes)
+    CaseDiagram.jsx          OLL / PLL case pictures, computed from each algorithm
+    SolverPanel.jsx          solver UI (cubes); BigCubeSolution.jsx plays big-cube stages
     GenericSolvePanel.jsx    optimal solver (other puzzles)
   lib/
     cubeState.js             cube state, moves, notation parser, scrambles
@@ -69,6 +73,11 @@ src/
     patternRecognition.js    cube stage detection, reduction, parity invariants
     twophase.js              Kociemba's two-phase algorithm
     solveInput.js            any N×N state → solvable 3×3 (+ parity fix)
+    bigcube/                 4×4 / 5×5 reduction solver (runs in bigcube.worker.js)
+      centers.js             center stages with exact distance tables
+      centerCycles.js        5×5 +-centers by generated 3-cycles
+      edges.js               wings by generated 3-cycles
+      solve.js               the pipeline: centers, parity, edges, 3×3
     puzzles/                 the geometry engine
       engine.js              moves, enumeration, optimal solver, graph model, from geometry alone
       ivy.js, diamond.js     puzzle definitions: sticker outlines, axes, cuts

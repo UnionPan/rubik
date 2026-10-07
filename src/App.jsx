@@ -1,12 +1,11 @@
 import { useState, useCallback, useRef, useMemo, useEffect, lazy, Suspense } from 'react';
 import FlatCubeMap from './components/FlatCubeMap';
-import PlayPanel from './components/PlayPanel';
 import TourDialog from './components/TourDialog';
 import Segmented from './components/ui/Segmented';
 import { ExplainContext, readExplainPreference, writeExplainPreference } from './components/ui/explain';
 import GraphSidePanel from './components/GraphSidePanel';
 import Splitter from './components/Splitter';
-import GenericPlayPanel from './components/GenericPlayPanel';
+import TurnPad from './components/TurnPad';
 import MovesLeft from './components/MovesLeft';
 import { getLibrary } from './lib/libraries';
 import usePuzzleOracle from './hooks/usePuzzleOracle';
@@ -22,9 +21,8 @@ const PuzzleViewer3D = lazy(() => import('./components/PuzzleViewer3D'));
 // Tabs other than the default Guide load on first use
 const AlgebraPanel = lazy(() => import('./components/AlgebraPanel'));
 const AlgorithmPanel = lazy(() => import('./components/AlgorithmPanel'));
-const GraphTheoryPanel = lazy(() => import('./components/GraphTheoryPanel'));
+const GraphsPanel = lazy(() => import('./components/GraphsPanel'));
 const SolverPanel = lazy(() => import('./components/SolverPanel'));
-const GenericGraphsPanel = lazy(() => import('./components/GenericGraphsPanel'));
 const GenericSolvePanel = lazy(() => import('./components/GenericSolvePanel'));
 import { detectPattern } from './lib/patternRecognition';
 import './App.css';
@@ -32,7 +30,6 @@ import './App.css';
 
 // Right-panel tabs; short labels are used when the panel is narrow
 const PANEL_TABS = [
-  { id: 'play',       label: 'Play',       short: 'Play',  title: 'Turn the cube' },
   { id: 'algorithms', label: 'Algorithms', short: 'Algs',  title: 'Algorithms and the pattern detector' },
   { id: 'math',       label: 'Math',       short: 'Math',  title: 'Group theory and graph theory, live' },
   { id: 'solve',      label: 'Solve',      short: 'Solve', title: 'Two-phase solver' },
@@ -101,10 +98,7 @@ export default function App() {
   const [state, setState]             = useState(() => initial?.state ?? getModel('cube3').solvedState());
   const [moveHistory, setMoveHistory] = useState(initial?.moves ?? []);
   const [currentAlgorithm, setCurrentAlgorithm] = useState(null);
-  const [highlightFace, setHighlightFace]       = useState(null);
   const [sideView, setSideView]                 = useState('graph'); // 'graph' | 'net' | null
-  const [customInput, setCustomInput]           = useState('');
-  const [inputError, setInputError]             = useState('');
   const [scrambleMsg, setScrambleMsg]           = useState(initial?.scramble ?? '');
   const [scrambleTurns, setScrambleTurns]       = useState(initial?.scrambleTurns ?? []); // turns of the last scramble
   const [shareNote, setShareNote]               = useState('');
@@ -123,7 +117,7 @@ export default function App() {
     mq.addEventListener('change', onChange);
     return () => mq.removeEventListener('change', onChange);
   }, []);
-  const [activeTab, setActiveTab]               = useState('play');
+  const [activeTab, setActiveTab]               = useState('algorithms');
   const [mathView, setMathView]                 = useState('groups');
   const [tourOpen, setTourOpen]                 = useState(false);
   // Global "Explain" switch: opens or closes every "Why?" section
@@ -135,6 +129,7 @@ export default function App() {
     });
   }, []);
   const [animating, setAnimating]               = useState(false);
+  const [longRun, setLongRun]                   = useState(false); // a multi-move sequence is playing
   const [animSpeed, setAnimSpeed]               = useState(2); // 0.5–5x
   const [focusOrbit, setFocusOrbit]             = useState(null);
   const [showOrbits, setShowOrbits]             = useState(false);
@@ -180,7 +175,7 @@ export default function App() {
   const animSpeedRef   = useRef(animSpeed);
   const sequenceRunRef = useRef(false); // true while a sequence is playing
   const turnQueueRef   = useRef([]);    // single turns waiting to play (keys, swipes)
-  // Keep current state in a ref so playMoveSequence/handleCustomInput can read it without stale closure
+  // Keep current state in a ref so playMoveSequence can read it without stale closure
   const stateRef = useRef(state);
   const updateState = useCallback((s) => {
     setState(s);
@@ -220,9 +215,7 @@ export default function App() {
     setMoveHistory([]);
     setScrambleTurns([]);
     setCurrentAlgorithm(null);
-    setHighlightFace(null);
     setScrambleMsg('');
-    setCustomInput('');
     setFocusOrbit(null);
     setGraphMove(null);
   }, []);
@@ -234,6 +227,7 @@ export default function App() {
     if (sequenceRunRef.current || parsedMoves.length === 0) return;
     sequenceRunRef.current = true;
     setAnimating(true);
+    setLongRun(parsedMoves.length > 1);
 
     let idx = 0;
     let cur = startState; // local accumulator — no stale closure issue
@@ -242,6 +236,7 @@ export default function App() {
       if (idx >= parsedMoves.length) {
         sequenceRunRef.current = false;
         setAnimating(false);
+        setLongRun(false);
         drainTurnQueueRef.current?.(); // keys pressed meanwhile play next
         return;
       }
@@ -304,60 +299,14 @@ export default function App() {
     setMoveHistory([]);
     setScrambleTurns([]);
     setCurrentAlgorithm(null);
-    setHighlightFace(null);
     setScrambleMsg('');
-    setCustomInput('');
     setGraphMove(null);
   }, [updateState]);
-
-  // ── Single move (move buttons) ────────────────────────────────────────
-  const applyTurnAnimated = useCallback((turn) => {
-    if (sequenceRunRef.current) return;
-    sequenceRunRef.current = true;
-    setAnimating(true);
-
-    runAnimation(turn, () => {
-      const next = modelRef.current.applyTurn(stateRef.current, turn);
-      updateState(next);
-      setMoveHistory(prev => [...prev, turn]);
-      sequenceRunRef.current = false;
-      setAnimating(false);
-    });
-  }, [runAnimation, updateState]);
-  // Cube move buttons speak (face, layer, cw)
-  const applyMoveAnimated = useCallback((face, layer, cw) => {
-    const notation = `${layer > 0 ? layer + 1 : ''}${face}${cw ? '' : "'"}`;
-    applyTurnAnimated({ face, layers: [layer], cw, notation });
-  }, [applyTurnAnimated]);
 
   // ── Algorithm stepper animation ──────────────────────────────────────
   // A lightweight hook for AlgorithmPanel: animate one move on the cube and
   // graph without touching sequenceRunRef (the stepper manages its own lock).
   const animateAlgStep = runAnimation;
-
-  // ── Text input: parse & play animated sequence ────────────────────────
-  const handleCustomInput = useCallback(() => {
-    if (sequenceRunRef.current) return;
-    const raw = customInput.trim();
-    if (!raw) return;
-
-    let moves;
-    try {
-      moves = model.parseMoveSequence(raw);
-    } catch (err) {
-      const hint = isCube ? "R U R' U', Rw, M2, x" : `${model.axes.map(a => a.name).join(' ')} and ' for counter-clockwise`;
-      setInputError(`${err.message}. Try: ${hint}`);
-      return;
-    }
-
-    if (moves.length === 0) {
-      setInputError("Invalid notation. Try: R U R' U'");
-      return;
-    }
-    setInputError('');
-    // Start from current state (read from ref to avoid stale closure)
-    playMoveSequence(moves, stateRef.current);
-  }, [customInput, model, isCube, playMoveSequence]);
 
   // ── Algorithm stepper history ─────────────────────────────────────────
   // The stepper reports turns relative to the state it started from; the
@@ -458,7 +407,6 @@ export default function App() {
     setCurrentAlgorithm(alg);
   }, []);
 
-  const solved = model.isSolved(state);
   const detectedPattern = useMemo(
     () => (isCube ? detectPattern(state, cubeSize) : detectGeneric(model, state)),
     [state, isCube, cubeSize, model],
@@ -523,14 +471,6 @@ export default function App() {
 
           {/* ── Left: cube ── */}
           <section className="cube-section" ref={cubeSectionRef}>
-            {/* Info bar */}
-            <div className="cube-info-bar">
-              <span className="info-chip">{model.name}</span>
-              <span className="info-chip">{model.stickerCount} stickers</span>
-              <span className="info-chip">|G| {isCube && model.N > 2 ? '≈' : '='} {model.groupOrder}</span>
-              {solved && <span className="info-chip solved-chip">✓ Solved</span>}
-            </div>
-
             {/* 3D viewport + optional side-by-side flat map */}
             <div
               ref={cubeAreaRef}
@@ -546,7 +486,6 @@ export default function App() {
                     <CubeViewer3D
                       state={state}
                       size={cubeSize}
-                      highlightFace={highlightFace}
                       animateMoveRef={cubeAnimRef}
                       onTurn={enqueueTurn}
                     />
@@ -593,7 +532,6 @@ export default function App() {
                   key={puzzleId}
                   graph={model.graph}
                   state={state}
-                  highlightFace={highlightFace}
                   animateRef={graphAnimRef}
                   focusOrbit={focusOrbit}
                   onFocusOrbit={setFocusOrbit}
@@ -618,7 +556,7 @@ export default function App() {
                     >✕</button>
                   </div>
                   <div className="flatmap-side-body">
-                    <FlatCubeMap state={state} size={cubeSize} highlightFace={highlightFace} />
+                    <FlatCubeMap state={state} size={cubeSize} />
                   </div>
                   <div className="flatmap-side-legend">
                     {['U','R','F','D','L','B'].map(f => (
@@ -634,59 +572,18 @@ export default function App() {
               )}
             </div>
 
-            {/* Notation input + speed control */}
-            <div className="move-input-section">
-              <div className="move-input-row">
-                <input
-                  className="move-input"
-                  placeholder={isCube ? "R U R' U' F2 Rw M x ..." : `${model.axes.map(a => a.name).join(' ')} …`}
-                  value={customInput}
-                  onChange={e => setCustomInput(e.target.value)}
-                  onKeyDown={e => e.key === 'Enter' && !animating && handleCustomInput()}
-                  disabled={animating}
-                />
-                <button
-                  className="apply-btn"
-                  onClick={handleCustomInput}
-                  disabled={animating}
-                >
-                  {animating ? '…' : 'Apply'}
-                </button>
-              </div>
-              {inputError && <div className="input-error">{inputError}</div>}
-
-              {/* Speed control */}
-              <div className="speed-row">
-                <span className="speed-row-label">Speed</span>
-                <input
-                  type="range"
-                  className="speed-slider-inline"
-                  min="0.5"
-                  max="5"
-                  step="0.5"
-                  value={animSpeed}
-                  onChange={e => handleSpeedChange(parseFloat(e.target.value))}
-                  disabled={instantTurns}
-                  aria-label="Animation speed"
-                />
-                <span className="speed-row-value">{instantTurns ? 'instant' : `${animSpeed}×`}</span>
-                {!instantTurns && (
-                  <span className="speed-row-hint">({speedToDuration(animSpeed)}ms/move)</span>
-                )}
-                {prefersReducedMotion && (
-                  <button
-                    className="speed-motion-btn"
-                    onClick={() => setAnimateAnyway(v => !v)}
-                    title="Your system asks for reduced motion, so turns are instant by default"
-                  >
-                    {animateAnyway ? 'Instant turns' : 'Animate turns'}
-                  </button>
-                )}
-              </div>
-              {scrambleMsg && (
-                <div className="scramble-display">Scramble: <code>{scrambleMsg}</code></div>
-              )}
-            </div>
+            <TurnPad
+              key={puzzleId}
+              model={model}
+              onTurn={enqueueTurn}
+              disabled={longRun}
+              speed={animSpeed}
+              onSpeedChange={handleSpeedChange}
+              instantTurns={instantTurns}
+              prefersReducedMotion={prefersReducedMotion}
+              animateAnyway={animateAnyway}
+              onToggleAnimate={() => setAnimateAnyway(v => !v)}
+            />
           </section>
 
           <Splitter
@@ -725,17 +622,6 @@ export default function App() {
 
             <div className="panel-content">
               <Suspense fallback={<div className="panel-loading" role="status">Loading…</div>}>
-                {activeTab === 'play' && (isCube ? (
-                  <PlayPanel
-                    cubeSize={cubeSize}
-                    onMove={applyMoveAnimated}
-                    disabled={animating}
-                    highlightFace={highlightFace}
-                    onHighlightFace={setHighlightFace}
-                  />
-                ) : (
-                  <GenericPlayPanel model={model} onTurn={applyTurnAnimated} disabled={animating} />
-                ))}
                 {activeTab === 'algorithms' && (
                   <AlgorithmPanel
                     key={puzzleId}
@@ -769,28 +655,19 @@ export default function App() {
                         godsNumber={oracle.info?.godsNumber ?? null}
                       />
                     )}
-                    {mathView === 'graphs' && (isCube ? (
-                      <GraphTheoryPanel
-                        state={state}
-                        size={cubeSize}
-                        moveHistory={moveHistory}
-                        focusOrbit={focusOrbit}
-                        onFocusOrbit={setFocusOrbit}
-                        lastMove={graphMove}
-                        graphVisible={sideView === 'graph'}
-                        onShowGraph={() => setSideView('graph')}
-                      />
-                    ) : (
-                      <GenericGraphsPanel
+                    {mathView === 'graphs' && (
+                      <GraphsPanel
                         model={model}
                         state={state}
+                        lastMove={graphMove}
                         focusOrbit={focusOrbit}
                         onFocusOrbit={setFocusOrbit}
                         graphVisible={sideViewShown === 'graph'}
                         onShowGraph={() => setSideView('graph')}
-                        oracle={oracle}
+                        onTurn={enqueueTurn}
+                        oracle={isCube ? null : oracle}
                       />
-                    ))}
+                    )}
                   </>
                 )}
                 {activeTab === 'solve' && (isCube ? (
@@ -817,28 +694,11 @@ export default function App() {
           </section>
         </main>
 
-        {/* ── Footer ── */}
-        <footer className="footer">
-          <a href="https://en.wikipedia.org/wiki/Rubik%27s_Cube_group" target="_blank" rel="noreferrer">
-            Rubik's Cube Group
-          </a>
-          {' · '}
-          <a href="https://cube20.org" target="_blank" rel="noreferrer">God's Number</a>
-          {' · '}
-          <a href="https://people.math.harvard.edu/~jjchen/docs/Group%20Theory%20and%20the%20Rubik%27s%20Cube.pdf"
-             target="_blank" rel="noreferrer">
-            Janet Chen — Group Theory and the Rubik's Cube
-          </a>
-          {' · '}
-          <a href="https://en.wikipedia.org/wiki/Metamagical_Themas" target="_blank" rel="noreferrer">
-            Hofstadter — Metamagical Themas (1981)
-          </a>
-        </footer>
       </div>
       {tourOpen && (
         <TourDialog
           onClose={() => setTourOpen(false)}
-          onFinish={() => { setTourOpen(false); setActiveTab('play'); }}
+          onFinish={() => { setTourOpen(false); setActiveTab('algorithms'); }}
         />
       )}
     </ExplainContext.Provider>

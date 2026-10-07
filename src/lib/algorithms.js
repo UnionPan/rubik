@@ -24,7 +24,7 @@ export const ALGORITHMS = [
     cubeSize: [2, 3, 4, 5],
     notation: "R U R' U'",
     description:
-      'The most fundamental Rubik\'s cube algorithm. Repeated 6 times returns to solved. Moves a corner from front-right-top.',
+      'Right side up, top left, right side down, top back. The building block of countless algorithms: six in a row and the cube is solved again.',
     groupTheoryNote:
       'This is the commutator [R, U] = R U R⁻¹ U⁻¹. As an element of the Rubik group G, it has order 6.',
     algebraNote: 'Commutator: [R, U]',
@@ -35,7 +35,7 @@ export const ALGORITHMS = [
     category: 'Beginner',
     cubeSize: [2, 3, 4, 5],
     notation: "R' F R F'",
-    description: 'Inverse of the Sune-related setup. Used in many beginner approaches for corners.',
+    description: 'A four-move trick that pulls a corner and an edge out of the front-right slot together. Often paired with the sexy move.',
     groupTheoryNote: 'This is [R⁻¹, F] = R⁻¹ F R F⁻¹. Also order 6.',
     algebraNote: 'Commutator: [R⁻¹, F]',
   },
@@ -46,7 +46,7 @@ export const ALGORITHMS = [
     cubeSize: [3, 4, 5],
     notation: "U R U' R'",
     description:
-      'Inserts a corner from the top layer into the front-right slot. Inverse of the sexy move.',
+      'Drops the corner above the front-right slot into the bottom layer below it.',
     groupTheoryNote: 'U R U⁻¹ R⁻¹ = [U, R] = the sexy move\'s inverse.',
     algebraNote: 'Commutator: [U, R]',
   },
@@ -56,7 +56,7 @@ export const ALGORITHMS = [
     category: 'Beginner',
     cubeSize: [3, 4, 5],
     notation: "U' L' U L U F U' F'",
-    description: 'Inserts an edge from the top layer into the front-left slot.',
+    description: 'Takes the top-front edge down into the middle layer on the left, keeping the bottom layer intact.',
     groupTheoryNote: null,
     algebraNote: null,
   },
@@ -69,7 +69,7 @@ export const ALGORITHMS = [
     cubeSize: [3, 4, 5],
     notation: "U R U' R'",
     description:
-      'Inserts a corner-edge pair into the right-front slot when both pieces are on the top layer.',
+      'The corner and its edge sit on top, ready to go: this drops both into the front-right slot together.',
     groupTheoryNote:
       'This is [U, R], a 3-generator sequence. The commutator structure preserves the solved bottom layer.',
     algebraNote: '[U, R]',
@@ -81,7 +81,7 @@ export const ALGORITHMS = [
     cubeSize: [3, 4, 5],
     notation: "U' L' U L",
     description:
-      'Inserts a corner-edge pair into the left-front slot.',
+      'The mirror image: drops a ready corner-edge pair into the front-left slot.',
     groupTheoryNote: "This is [U', L'] = [U⁻¹, L⁻¹].",
     algebraNote: "[U', L']",
   },
@@ -92,7 +92,7 @@ export const ALGORITHMS = [
     cubeSize: [3, 4, 5],
     notation: "R U R' U R U2 R'",
     description:
-      'Handles F2L case where corner and edge are split (corner on top, edge in slot wrong).',
+      'The corner is on top but its edge is stuck in the slot the wrong way: this lifts the edge out and pairs them.',
     groupTheoryNote: null,
     algebraNote: null,
   },
@@ -106,7 +106,7 @@ export const ALGORITHMS = [
     cubeSize: [2, 3, 4, 5],
     notation: "R U2 R' U' R U R' U' R U' R'",
     description:
-      'OLL #21. All edges oriented, 2 diagonal corners twisted. One of the 7 cross OLL cases.',
+      'The top cross is done and all four corners face sideways, in two pairs facing each other.',
     groupTheoryNote:
       'Diagonal corner twists cannot be separated from each other — twisting one corner clockwise forces another counterclockwise. This is why you always fix corners in pairs.',
     algebraNote: 'Cross OLL — 2 diagonal corner twists',
@@ -118,7 +118,7 @@ export const ALGORITHMS = [
     cubeSize: [2, 3, 4, 5],
     notation: "R U2 R2 U' R2 U' R2 U2 R",
     description:
-      'OLL #22. All edges oriented, 4 corners twisted (looks like the letter π). Symmetric case.',
+      'The top cross is done and all four corners face sideways: two point the same way, the other two point away from each other.',
     groupTheoryNote:
       'The Pi case is a double Sune composed with a rotation. Its corner-twist pattern has an elegant symmetry: every corner is wrong, but opposite pairs cancel out.',
     algebraNote: 'Cross OLL — all corners twisted',
@@ -130,7 +130,7 @@ export const ALGORITHMS = [
     cubeSize: [2, 3, 4, 5],
     notation: "R U R' U R U2 R'",
     description:
-      'OLL #27. Orients 3 corners of the last layer. One of the most important last-layer algorithms.',
+      'The top cross is done and one corner already faces up: the other three twist to face up. The most used last-layer algorithm.',
     groupTheoryNote:
       'Sune is (R U R\' U)(R U2 R\'): it twists three top corners and cycles three top edges while restoring everything below. Six Sunes in a row return the cube to solved, so its order is 6.',
     algebraNote: '(R U R\' U)(R U2 R\') — order 6',
@@ -141,7 +141,7 @@ export const ALGORITHMS = [
     category: 'OLL',
     cubeSize: [2, 3, 4, 5],
     notation: "R U2 R' U' R U' R'",
-    description: 'OLL #26. Inverse orientation of Sune. Orients 3 corners in the opposite cycle.',
+    description: 'Sune the other way round: one corner faces up and the other three twist the opposite way.',
     groupTheoryNote: "Anti-Sune is the inverse of Sune in the Rubik group.",
     algebraNote: 'Inverse of Sune',
   },
@@ -151,7 +151,7 @@ export const ALGORITHMS = [
     category: 'OLL',
     cubeSize: [2, 3, 4, 5],
     notation: "F R U R' U' F'",
-    description: 'OLL #45. Orients edges in a T-pattern. The "inverse" of the standard edge flip.',
+    description: 'The top shows a T: two corners and a line of edges face up. Turns the rest up in six moves.',
     groupTheoryNote:
       'F [R U R\' U\'] F\' = F · (commutator [R,U]) · F⁻¹ is a conjugation of [R,U] by F.',
     algebraNote: 'Conjugate: F · [R, U] · F⁻¹',
@@ -159,24 +159,24 @@ export const ALGORITHMS = [
   // L-shape OLLs (2 adjacent edges oriented)
   {
     id: 'oll_37',
-    name: 'OLL 37 (Hockey Stick)',
+    name: 'OLL 37 (Fish)',
     category: 'OLL',
     cubeSize: [2, 3, 4, 5],
     notation: "F R U' R' U' R U R' F'",
     description:
-      'OLL #37. Two adjacent edges oriented (L-shape), one corner twisted. Looks like a hockey stick on the U face.',
+      'Two neighboring edges and two opposite corners face up: a fish shape. Turns the rest up.',
     groupTheoryNote:
       'This is a conjugate: F · [R U\' R\' U\' R U R\'] · F⁻¹. The inner part orients the corner, while F and F⁻¹ redirect which pieces are affected.',
     algebraNote: 'Conjugate: F · (corner sequence) · F⁻¹',
   },
   {
     id: 'oll_33',
-    name: 'OLL 33 (P shape)',
+    name: 'OLL 33 (T shape)',
     category: 'OLL',
     cubeSize: [2, 3, 4, 5],
     notation: "R U R' U' R' F R F'",
     description:
-      'OLL #33. Two adjacent edges oriented. Extremely common in practice; often used as a sub-case.',
+      'Another T on top, like the T-shape, but the two loose corners point away from each other.',
     groupTheoryNote:
       'R U R\' U\' followed by R\' F R F\' is a product of two commutator-like structures. This is [R, U] · [R\', F].',
     algebraNote: '[R, U] · [R⁻¹, F] (product)',
@@ -184,12 +184,12 @@ export const ALGORITHMS = [
   // Line OLLs (2 opposite edges oriented)
   {
     id: 'oll_44',
-    name: 'OLL 44 (Line L)',
+    name: 'OLL 44 (P shape)',
     category: 'OLL',
     cubeSize: [2, 3, 4, 5],
     notation: "F U R U' R' F'",
     description:
-      'OLL #44. Two opposite edges oriented (line), with specific corner orientations. One of the shortest OLL algorithms.',
+      'A P shape on top: a 2×2 block and one more corner face up. One of the shortest cases.',
     groupTheoryNote:
       'F · (U R U\' R\') · F⁻¹ is a conjugate: the inner sequence [U, R] acts on corners, F redirects the effect to the last layer edges.',
     algebraNote: 'Conjugate: F · [U, R] · F⁻¹',
@@ -200,7 +200,7 @@ export const ALGORITHMS = [
     category: 'OLL',
     cubeSize: [3, 4, 5],
     notation: "F R U R' U' F' f R U R' U' f'",
-    description: 'OLL when no edges are oriented (dot case). Uses two conjugated commutators.',
+    description: 'No top edge faces up, only the center does. The hardest-looking case, solved with two short sequences back to back.',
     groupTheoryNote: 'Product of two conjugated commutators: F[R,U]F⁻¹ · f[R,U]f⁻¹.',
     algebraNote: 'Product of conjugates',
   },
@@ -213,7 +213,7 @@ export const ALGORITHMS = [
     cubeSize: [2, 3, 4, 5],
     notation: "R U R' U' R' F R2 U' R' U' R U R' F'",
     description:
-      'PLL T-permutation. Swaps two adjacent corners and two adjacent edges on the last layer.',
+      'Swaps two corners on one side and the two edges on the left and right. Shaped like a T.',
     groupTheoryNote:
       'T-perm is a double transposition: it swaps corners UFR↔UBR and edges UL↔UR. Each swap alone is odd; together they are even, and doing it twice is the identity (order 2).',
     algebraNote: 'Order 2 element (double transposition)',
@@ -224,7 +224,7 @@ export const ALGORITHMS = [
     category: 'PLL',
     cubeSize: [3, 4, 5],
     notation: "R U' R U R U R U' R' U' R2",
-    description: 'Cycles three edges clockwise on the last layer.',
+    description: 'Moves three top edges around clockwise; the corners stay.',
     groupTheoryNote:
       'U-perm is a 3-cycle in the symmetric group S₄ acting on the corners. It is an even permutation (product of two transpositions), hence lies in A₄.',
     algebraNote: '3-cycle (even permutation)',
@@ -235,7 +235,7 @@ export const ALGORITHMS = [
     category: 'PLL',
     cubeSize: [3, 4, 5],
     notation: "R2 U R U R' U' R' U' R' U R'",
-    description: 'Cycles three edges counter-clockwise on the last layer.',
+    description: 'Moves three top edges around counter-clockwise; the corners stay.',
     groupTheoryNote: 'Inverse of the CW U-perm. Also a 3-cycle, order 3.',
     algebraNote: '3-cycle inverse',
   },
@@ -246,7 +246,7 @@ export const ALGORITHMS = [
     cubeSize: [2, 3, 4, 5],
     notation: "F R U' R' U' R U R' F' R U R' U' R' F R F'",
     description:
-      'Swaps two diagonal corners and two adjacent edges. One of the only PLL algorithms involving diagonal swaps.',
+      'Swaps two diagonal corners and two neighboring edges.',
     groupTheoryNote:
       'Y-perm swaps diagonal corners. Since diagonal corner swaps require an odd permutation of corners, Y-perm cannot be decomposed into pure edge or corner cycles without coupling.',
     algebraNote: 'Diagonal transpositions',
@@ -259,7 +259,7 @@ export const ALGORITHMS = [
     cubeSize: [2, 3, 4, 5],
     notation: "R' U L' U2 R U' R' U2 R L U'",
     description:
-      'Swaps two adjacent corners and two adjacent edges on the top layer. One of the J-perm variants.',
+      'Swaps two neighboring corners and the two edges next to them.',
     groupTheoryNote:
       'Two transpositions at once: one of corners, one of edges. Each swap alone is odd, but together they make an even permutation, which is why a legal cube can do it. Doing it twice is the identity: its order is 2.',
     algebraNote: '(corner swap)(edge swap) — even, order 2',
@@ -271,7 +271,7 @@ export const ALGORITHMS = [
     cubeSize: [2, 3, 4, 5],
     notation: "R U' R' U' R U R D R' U' R D' R' U2 R' U'",
     description:
-      'Swaps two adjacent corners and two edges on the top layer.',
+      'Swaps two neighboring corners and two edges.',
     groupTheoryNote:
       'Like the J-perm, a corner swap paired with an edge swap: two odd transpositions whose product is even. Order 2.',
     algebraNote: '(corner swap)(edge swap) — even, order 2',
@@ -283,7 +283,7 @@ export const ALGORITHMS = [
     cubeSize: [2, 3, 4, 5],
     notation: "R' F R' B2 R F' R' B2 R2",
     description:
-      'Cycles three corners clockwise on the last layer with no edge movement.',
+      'Moves three corners around; the edges stay.',
     groupTheoryNote:
       'A-perm is a pure 3-cycle on corners. Since a 3-cycle is an even permutation, it lies in the alternating group A₄ acting on the 4 U-layer corners.',
     algebraNote: 'Pure corner 3-cycle — even permutation, order 3',
@@ -295,7 +295,7 @@ export const ALGORITHMS = [
     cubeSize: [2, 3, 4, 5],
     notation: "R2 B2 R F R' B2 R F' R",
     description:
-      'Inverse of A-Perm CW. Cycles three corners counter-clockwise.',
+      'Moves three corners around the other way; the edges stay.',
     groupTheoryNote:
       'Inverse of A-perm CW. Two applications of A-perm CW equal A-perm CCW (since order 3): (A_cw)² = A_ccw.',
     algebraNote: 'Inverse 3-cycle — order 3',
@@ -347,7 +347,7 @@ export const ALGORITHMS = [
     cubeSize: [3, 4, 5],
     notation: "M2 E2 S2",
     description:
-      'Creates a checkerboard pattern on all 6 faces. Each center color swaps with its opposite.',
+      'Every face becomes a checkerboard of its own color and the opposite one.',
     groupTheoryNote:
       'M², E², S² are all order-2 elements (they equal their own inverses). Their product generates the checkerboard: an element of order 2 in the center of the Rubik group\'s abelianization.',
     algebraNote: 'Product of order-2 elements',
@@ -359,7 +359,7 @@ export const ALGORITHMS = [
     cubeSize: [3],
     notation: "U R2 F B R B2 R U2 L B2 R U' D' R2 F R' L B2 U2 F2",
     description:
-      'All 12 edges flipped in place, corners unchanged. The furthest position from solved: requires exactly 20 moves (God\'s Number proof).',
+      'Every edge flipped in place, everything else solved. It is one of the hardest positions there is: no solution is shorter than 20 moves.',
     groupTheoryNote:
       'The superflip flips all 12 edges in place and moves nothing else. It is in the center of the whole cube group: it commutes with every move. Edge flips must sum to an even number, so the edge-flip subgroup is ℤ₂¹¹. In 1995 the superflip was the first position proven to need 20 moves.',
     algebraNote: 'Central element; lies in the edge-flip subgroup ℤ₂¹¹',
@@ -385,7 +385,7 @@ export const ALGORITHMS = [
     cubeSize: [3, 4, 5],
     notation: "R U R' U'",
     description:
-      'The simplest commutator [R, U]. Demonstrates how commutators perform 3-cycles of corners when repeated, a foundational technique in group-theoretic cube solving.',
+      'R U R\' U\' again, as an idea: do two moves, undo them in the same order, and only the pieces both moves touch end up changed.',
     groupTheoryNote:
       'A commutator [A, B] = A B A⁻¹ B⁻¹ measures how much A and B fail to commute. For the Rubik group, commutators of face moves are typically 3-cycles or double-transpositions — the building blocks of all solving algorithms.',
     algebraNote: '[R, U] = R U R⁻¹ U⁻¹',
@@ -401,7 +401,7 @@ export const ALGORITHMS = [
     cubeSize: [3, 4, 5],
     notation: "F R U R' U' F'",
     description:
-      'A conjugate F · [R,U] · F⁻¹. Shows how conjugating a commutator by F translates its effect to different pieces, a key technique for OLL/PLL.',
+      'F, then the sexy move, then F back: the same shuffle as the sexy move, carried to different pieces by the setup move F.',
     groupTheoryNote:
       'Conjugation: A B A⁻¹ "transports" the action of B to a new position. If B = [R, U] affects front-right corner, then F B F⁻¹ affects whichever corner F moved there. This is the group-theoretic basis of the "setup move + algorithm + undo setup" technique.',
     algebraNote: 'Conjugate: F · [R, U] · F⁻¹',

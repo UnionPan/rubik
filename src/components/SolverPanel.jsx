@@ -2,6 +2,7 @@ import { useState, useEffect, useRef, useCallback, useMemo } from 'react';
 import { parseMoveSequence, isSolved } from '../lib/cubeState';
 import { buildSolveInput } from '../lib/solveInput';
 import Section from './ui/Section';
+import BigCubeSolution from './BigCubeSolution';
 
 // ── Phase 2 move set: only these are allowed in H = <U, D, R2, L2, F2, B2> ──
 const PHASE2_SET = new Set(['U', "U'", 'U2', 'D', "D'", 'D2', 'R2', 'L2', 'F2', 'B2']);
@@ -10,10 +11,11 @@ const PHASE2_SET = new Set(['U', "U'", 'U2', 'D', "D'", 'D2', 'R2', 'L2', 'F2', 
 function isPhase1Only(tok) { return !PHASE2_SET.has(tok); }
 
 /**
- * SolverPanel - two-phase (Kociemba) solver for every cube size.
- *   2×2        corners on a virtual 3×3
- *   3×3        solved directly from the current colors
- *   4×4, 5×5   once reduced: parity fix (if needed), then the reduced 3×3
+ * SolverPanel - the solver for every cube size.
+ *   2×2        two-phase on the corners of a virtual 3×3
+ *   3×3        two-phase, directly from the current colors
+ *   4×4, 5×5   by reduction in a worker (centers, parity, edges, 3×3); a
+ *              cube already reduced by hand just gets the parity fix and 3×3
  * Props:
  *   state, cubeSize
  *   animating      — true while a sequence plays
@@ -35,6 +37,14 @@ export default function SolverPanel({
   const [solveError, setSolveError]   = useState(null);
   const workerRef = useRef(null);
   const reqIdRef  = useRef(0);
+  // Big cubes: the reduction solver, in its own worker, started on first use
+  const [bigSolution, setBigSolution] = useState(null); // { start, stages }
+  const [bigStep, setBigStep]         = useState(null); // progress while solving
+  const [bigError, setBigError]       = useState(null);
+  const bigWorkerRef = useRef(null);
+  const bigReqRef    = useRef(0);
+  const bigStartRef  = useRef(null); // the state the current request solves
+  useEffect(() => () => bigWorkerRef.current?.terminate(), []);
   const pendingPrefixRef = useRef([]);
 
   // ── Worker lifecycle (one solver for every size) ──────────────────────
@@ -93,12 +103,41 @@ export default function SolverPanel({
     if (turns.length) playMoveSequence(turns, stateRef.current);
   }, [solution, animating, cubeSize, playMoveSequence, stateRef]);
 
+  const handleBigSolve = useCallback(() => {
+    if (bigStep || animating) return;
+    if (!bigWorkerRef.current) {
+      const w = new Worker(new URL('../lib/bigcube/bigcube.worker.js', import.meta.url), { type: 'module' });
+      w.onmessage = (e) => {
+        const { type, id, step, stages, error: err } = e.data;
+        if (id !== bigReqRef.current) return;
+        if (type === 'progress') { setBigStep(step); return; }
+        setBigStep(null);
+        if (err) setBigError(`Solver error: ${err}`);
+        else setBigSolution({ start: bigStartRef.current, stages });
+      };
+      w.onerror = (e) => { setBigStep(null); setBigError('Solver crashed: ' + (e.message || 'unknown')); };
+      bigWorkerRef.current = w;
+    }
+    bigReqRef.current += 1;
+    setBigError(null);
+    setBigSolution(null);
+    setBigStep('tables');
+    bigStartRef.current = stateRef.current;
+    bigWorkerRef.current.postMessage({ id: bigReqRef.current, state: stateRef.current, N: cubeSize });
+  }, [bigStep, animating, stateRef, cubeSize]);
+
+  const playTurns = useCallback((turns) => {
+    if (!animating && turns.length) playMoveSequence(turns, stateRef.current);
+  }, [animating, playMoveSequence, stateRef]);
+
   const isBig = cubeSize > 3;
+  const fullBigSolve = isBig && !input.ok; // not reduced yet: the worker does everything
   const reduction = isBig ? REDUCTION_SIZES[cubeSize] : null;
 
   const caption = cubeSize === 2 ? 'Kociemba two-phase, on the corners of a virtual 3×3.'
-    : isBig ? `Reduce the ${cubeSize}×${cubeSize} by hand; the solver finishes it.`
+    : isBig ? 'Centers, then edges, then it is a 3×3: the way people solve big cubes.'
     : 'Kociemba two-phase, from the current colors.';
+  const bigStepText = { tables: 'Getting ready…', centers: 'Solving the centers…', edges: 'Matching the edges…', '3x3': 'Finishing the 3×3…' };
 
   return (
     <div className="panel-stack">
@@ -106,17 +145,28 @@ export default function SolverPanel({
 
         {/* ── Big cube: reduction progress until the solver can take over ── */}
         {isBig && (
-          <ReductionStatus input={input} pattern={detectedPattern} cubeSize={cubeSize} solved={cubeIsSolved} />
+          <ReductionStatus input={input} pattern={detectedPattern} solved={cubeIsSolved} />
         )}
 
         {/* ── Worker status ── */}
-        <div className={`solver-status-bar ${workerReady ? 'ready' : 'loading'}`}>
-          {workerReady
-            ? <><span className="ssb-dot green"/>Solver ready</>
-            : <><span className="ssb-dot spin"/>Building the two-phase tables…</>}
-        </div>
+        {!fullBigSolve && (
+          <div className={`solver-status-bar ${workerReady ? 'ready' : 'loading'}`}>
+            {workerReady
+              ? <><span className="ssb-dot green"/>Solver ready</>
+              : <><span className="ssb-dot spin"/>Building the two-phase tables…</>}
+          </div>
+        )}
 
         {/* ── Solve button ── */}
+        {fullBigSolve ? (
+          <button
+            className={`solver-solve-btn ${bigStep ? 'solving' : ''}`}
+            onClick={handleBigSolve}
+            disabled={!!bigStep || animating || cubeIsSolved}
+          >
+            {bigStep ? <><span className="btn-spin">⏳</span> {bigStepText[bigStep]}</> : '★ Find solution'}
+          </button>
+        ) : (
         <button
           className={`solver-solve-btn ${solving ? 'solving' : ''}`}
           onClick={handleSolve}
@@ -135,6 +185,11 @@ export default function SolverPanel({
             : isBig ? '★ Finish the reduced cube'
             : '★ Find solution'}
         </button>
+        )}
+        {bigError && <div className="solver-error">{bigError}</div>}
+        {isBig && bigSolution && (
+          <BigCubeSolution solution={bigSolution} state={state} animating={animating} onPlay={playTurns} />
+        )}
 
         {!input.ok && !cubeIsSolved && !isBig && <div className="solver-error">{input.reason}</div>}
         {solveError && <div className="solver-error">{solveError}</div>}
@@ -182,7 +237,7 @@ export default function SolverPanel({
 
 // ── Big cube: where the reduction stands ──────────────────────────────────────
 
-function ReductionStatus({ input, pattern, cubeSize, solved }) {
+function ReductionStatus({ input, pattern, solved }) {
   if (solved) return null;
   if (input.ok) {
     return (
@@ -215,8 +270,7 @@ function ReductionStatus({ input, pattern, cubeSize, solved }) {
         </div>
       )}
       <p className="rdx-status-note">
-        Centers and edge pairing are done by hand (the Algorithms tab shows the pairing move).
-        Once the {cubeSize}×{cubeSize} is reduced, this tab finishes it: parity fix plus a two-phase solve.
+        Do it yourself with the Algorithms tab, or let the solver do every stage.
       </p>
     </div>
   );

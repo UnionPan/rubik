@@ -1,13 +1,13 @@
-import { useMemo, useState, useCallback } from 'react';
+import { useMemo, useState } from 'react';
 import { permToCycles, solvedState, FACE_NAMES, COLORS } from '../lib/cubeState';
 import { algorithmOrder } from '../lib/algorithms';
 import Section from './ui/Section';
 
 const GROUP_SIZES = {
-  2: { math: '|G₂| = 3,674,160', fact: "God's number for the 2×2 is 11 (half turns)." },
-  3: { math: '|G₃| ≈ 4.3 × 10¹⁹', fact: "God's number for the 3×3 is 20 (half turns), proven in 2010." },
-  4: { math: '|G₄| ≈ 7.4 × 10⁴⁵', fact: "God's number for the 4×4 is not known." },
-  5: { math: '|G₅| ≈ 2.8 × 10⁷⁴', fact: "God's number for the 5×5 is not known." },
+  2: { math: '3,674,160', fact: 'Every one can be solved in 11 turns or fewer.' },
+  3: { math: '4.3 × 10¹⁹', fact: 'Every one can be solved in 20 turns or fewer (proven in 2010).' },
+  4: { math: '7.4 × 10⁴⁵', fact: 'Nobody knows how many turns always suffice.' },
+  5: { math: '2.8 × 10⁷⁴', fact: 'Nobody knows how many turns always suffice.' },
 };
 
 const lcm = (a, b) => { const g = (x, y) => (y ? g(y, x % y) : x); return (a / g(a, b)) * b; };
@@ -21,7 +21,6 @@ function composeTurn(model, perm, turn) {
   return next;
 }
 const identity = (n) => Array.from({ length: n }, (_, i) => i);
-const formatCycles = (model, cycles) => cycles.map(c => `(${c.map(model.slotLabel).join(' ')})`).join('');
 
 /**
  * AlgebraPanel - the Groups view of the Math tab, for any puzzle.
@@ -39,30 +38,30 @@ export default function AlgebraPanel({ model, state, moveHistory = [], solvePath
   const N = model.N;
   const stickers = model.stickerCount;
 
-  // Track which trace rows have their cycle string expanded
-  const [expandedRows, setExpandedRows] = useState({});
-  const toggleRow = useCallback((i) => {
-    setExpandedRows(prev => ({ ...prev, [i]: !prev[i] }));
-  }, []);
-
-  // ── Current permutation, exact: compose every turn since solved ───────
+  // Exact permutation after the scramble and after every move since.
   // (Colors alone cannot tell identical stickers apart on big cubes.)
-  const perm   = useMemo(
-    () => solvePath.reduce((p, t) => composeTurn(model, p, t), identity(stickers)),
-    [solvePath, model, stickers],
-  );
-  const cycles = useMemo(() => permToCycles(perm, true), [perm]);
-  const looksSolved = model.isSolved(state);
+  const scrambleLength = solvePath.length - moveHistory.length;
+  const perms = useMemo(() => {
+    let p = identity(stickers);
+    for (const t of solvePath.slice(0, scrambleLength)) p = composeTurn(model, p, t);
+    const out = [p];
+    for (const t of moveHistory) { p = composeTurn(model, p, t); out.push(p); }
+    return out;
+  }, [solvePath, scrambleLength, moveHistory, model, stickers]);
+
+  // The step being looked at: a clicked chip, or the latest move.  A new move
+  // (new perms) drops the pick, so the picture follows play again.
+  const [pick, setPick] = useState({ step: null, perms: null });
+  const setPicked = (step) => setPick({ step, perms });
+  const latest = perms.length - 1;
+  const step = pick.perms === perms && pick.step != null ? pick.step : latest;
+  const cycles = useMemo(() => permToCycles(perms[step], true), [perms, step]);
 
   const movedCount = cycles.reduce((a, c) => a + c.length, 0);
-  const cycleTypes = {};
-  cycles.forEach(c => { cycleTypes[c.length] = (cycleTypes[c.length] || 0) + 1; });
-  const cycleTypeStr = Object.entries(cycleTypes)
-    .sort(([a], [b]) => +a - +b)
-    .map(([len, cnt]) => cnt > 1 ? `${cnt}×(${len}-cycle)` : `(${len}-cycle)`)
-    .join(' ∘ ');
-  const parity = cycles.reduce((s, c) => s + c.length - 1, 0) % 2 === 0 ? 'Even' : 'Odd';
+  const even = cycles.reduce((s, c) => s + c.length - 1, 0) % 2 === 0;
   const order = cycles.reduce((o, c) => lcm(o, c.length), 1);
+  const looksSolved = step === latest && model.isSolved(state);
+  const scrambled = scrambleLength > 0;
 
   const algOrder = useMemo(() => (algorithm && isCube ? algorithmOrder(algorithm, N) : null), [algorithm, isCube, N]);
   // Order of a two-move sequence: R U on cubes, the first two axes elsewhere
@@ -73,66 +72,62 @@ export default function AlgebraPanel({ model, state, moveHistory = [], solvePath
   }, [model, sample, stickers]);
   const size = isCube
     ? GROUP_SIZES[N]
-    : { math: `|G| = ${model.groupOrder}`, fact: godsNumber != null ? `God's number is ${godsNumber}, found by visiting every position.` : 'Counting every position…' };
+    : { math: model.groupOrder, fact: godsNumber != null ? `Every one of them is at most ${godsNumber} turns from solved.` : 'Counting every position…' };
 
-  // ── Janet Chen trace: accumulate permutation step-by-step ─────────────
-  const trace = useMemo(() => {
-    const rows = [];
-    let p = identity(stickers);
-    for (const turn of moveHistory) {
-      p = composeTurn(model, p, turn);
-      const cumCycles = permToCycles(p, true);
-      rows.push({
-        notation: turn.notation,
-        cumCycleStr: formatCycles(model, cumCycles.slice(0, 4)) +
-          (cumCycles.length > 4 ? ` ···+${cumCycles.length - 4}` : ''),
-        cumCycleStrFull: formatCycles(model, cumCycles),
-        cumParity: cumCycles.reduce((acc, c) => acc + c.length - 1, 0) % 2 === 0 ? 'even' : 'odd',
-        cumCycleCount: cumCycles.length,
-        hasMore: cumCycles.length > 4,
-      });
-    }
-    return rows;
-  }, [moveHistory, model, stickers]);
+  const moves = moveHistory.slice(0, step);
+  const what = !scrambled
+    ? (moves.length <= 6 ? moves.map(t => t.notation).join(' ') : `${moves.length} moves`)
+    : moves.length === 0 ? 'the scramble'
+    : `the scramble and ${moves.length} move${moves.length === 1 ? '' : 's'}`;
 
   return (
     <div className="panel-stack">
-      {/* ── Live position ── */}
       <Section
         title="Your position"
-        caption="The exact sticker permutation since solved."
         why={<>
-          <p>
-            A <strong>group</strong> is a set with a way to combine elements that is associative,
-            has an identity and has inverses. Cube positions form one: a turn is an element,
-            doing two turns is multiplication, and undoing a turn is its inverse.
-          </p>
-          <p>
-            Every turn shuffles the {stickers} stickers, so every position is a
-            <strong> permutation</strong>. A <em>cycle</em> is a ring of stickers that each take the
-            next one&apos;s place; <em>parity</em> is whether the permutation is an even or odd
-            number of swaps; the <em>order</em> is how often you could repeat it before returning to start.
-          </p>
+          <p><strong>Permutation:</strong> any shuffle of the stickers. Every position is one.</p>
+          <p><strong>Cycle:</strong> one of the loops in the picture. Each sticker on it went to where the next one was.</p>
+          <p><strong>Order:</strong> how many times you repeat the same moves before everything is home.</p>
+          <p><strong>Parity:</strong> whether the shuffle takes an even or odd number of two-sticker swaps.</p>
+          <p><strong>Group:</strong> all positions together. Doing one sequence after another always gives another position, and every sequence can be undone.</p>
         </>}
       >
-        <div className="algebra-stat-row">
-          <StatChip label="Moved" tooltip={`Stickers not in their starting position, out of ${stickers}`} value={movedCount} />
-          <StatChip label="Cycles" tooltip="Disjoint cycles in the permutation" value={cycles.length} />
-          <StatChip label="Parity" tooltip="Even or odd number of swaps" value={parity}
-            color={parity === 'Even' ? '#6ee7b7' : '#f87171'} />
-          <StatChip label="Order" tooltip="Repeat this permutation this often to return to the start" value={order} />
-        </div>
-        {cycles.length > 0 && <div className="cycle-type-str math-mono">σ = {cycleTypeStr}</div>}
-        {cycles.length === 0 && <div className="solved-note">✓ Identity: every sticker is home.</div>}
-        {cycles.length > 0 && looksSolved && (
-          <div className="solved-note">
-            ✓ Looks solved, but {movedCount} stickers traded places with same-colored ones:
-            a non-identity element that fixes the coloring.
+        {(scrambled || moveHistory.length > 0) && (
+          <div className="mv-chips" role="group" aria-label="Pick a step">
+            <button className={`mv-chip mv-chip-start${step === 0 ? ' on' : ''}`}
+              onClick={() => setPicked(0)} aria-pressed={step === 0}>
+              {scrambled ? 'Scramble' : 'Start'}
+            </button>
+            {moveHistory.map((t, i) => (
+              <button key={i} className={`mv-chip${step === i + 1 ? ' on' : ''}`}
+                onClick={() => setPicked(i + 1 === latest ? null : i + 1)} aria-pressed={step === i + 1}>
+                {t.notation}
+              </button>
+            ))}
           </div>
+        )}
+
+        <p className="pos-sentence">
+          {step === 0 && !scrambled
+            ? 'Solved: every sticker is home. Turn a layer and watch this picture.'
+            : movedCount === 0
+              ? <>After <strong>{what}</strong>, every sticker is back home.</>
+              : <>After <strong>{what}</strong>, {movedCount} stickers are out of place, moving around {cycles.length} loop{cycles.length === 1 ? '' : 's'}.</>}
+        </p>
+
+        <CycleChordDiagram cycles={cycles} model={model} />
+
+        {movedCount > 0 && (
+          <ul className="pos-facts">
+            <li>Do all of that <strong>{order}</strong> time{order === 1 ? '' : 's'} in a row and every sticker is home again.</li>
+            <li>Putting it back by swapping two stickers at a time takes an <strong>{even ? 'even' : 'odd'}</strong> number of swaps.</li>
+            {looksSolved && (
+              <li>It looks solved, but some stickers traded places with identical ones.</li>
+            )}
+          </ul>
         )}
       </Section>
 
-      {/* ── Selected algorithm ── */}
       {algorithm && algOrder && (
         <Section
           title={algorithm.name}
@@ -151,115 +146,29 @@ export default function AlgebraPanel({ model, state, moveHistory = [], solvePath
             )}
           </>}
         >
-          <div className="algebra-stat-row">
-            <StatChip label="Order" tooltip="Repetitions until every sticker is home" value={algOrder.order} />
-            {algOrder.looksSolvedAfter !== algOrder.order && (
-              <StatChip label="Looks solved after" tooltip="Repetitions until the colors match again"
-                value={algOrder.looksSolvedAfter} />
-            )}
-          </div>
+          <p className="pos-sentence">
+            Repeat it <strong>{algOrder.order}</strong> time{algOrder.order === 1 ? '' : 's'} and the cube is exactly where it started
+            {algOrder.looksSolvedAfter !== algOrder.order && <>; it already looks solved after {algOrder.looksSolvedAfter}</>}.
+          </p>
         </Section>
       )}
 
-      {/* ── Janet Chen permutation trace ── */}
-      {trace.length > 0 && (
-        <Section
-          title="Move trace"
-          caption="Each turn composed into the running permutation."
-          why={<PermTraceExplainer stickers={stickers} />}
-        >
-          <div className="perm-trace">
-            <div className="perm-trace-row perm-trace-header">
-              <span className="pt-move">Move</span>
-              <span className="pt-cycles">Cycles</span>
-              <span className="pt-meta">#</span>
-              <span className="pt-parity">Parity</span>
-            </div>
-            <div className="perm-trace-row perm-trace-identity">
-              <span className="pt-move">start</span>
-              <span className="pt-cycles math-mono">identity</span>
-              <span className="pt-meta">0</span>
-              <span className="pt-parity even">even</span>
-            </div>
-            {trace.map((entry, i) => {
-              const isExpanded = !!expandedRows[i];
-              return (
-                <div
-                  key={i}
-                  className={`perm-trace-row ${i === trace.length - 1 ? 'perm-trace-current' : ''}${isExpanded ? ' perm-trace-expanded' : ''}`}
-                >
-                  <span className="pt-move">
-                    <span className="move-badge">{entry.notation}</span>
-                  </span>
-                  <span className="pt-cycles-wrap">
-                    <span className="pt-cycles math-mono">
-                      {isExpanded ? entry.cumCycleStrFull : (entry.cumCycleStr || 'id')}
-                    </span>
-                    {entry.hasMore && (
-                      <button
-                        className="pt-expand-btn"
-                        onClick={() => toggleRow(i)}
-                        title={isExpanded ? 'Collapse' : `Show all ${entry.cumCycleCount} cycles`}
-                      >
-                        {isExpanded ? '▲ less' : `▼ +${entry.cumCycleCount - 4}`}
-                      </button>
-                    )}
-                  </span>
-                  <span className="pt-meta">{entry.cumCycleCount}</span>
-                  <span className={`pt-parity ${entry.cumParity}`}>{entry.cumParity}</span>
-                </div>
-              );
-            })}
-          </div>
-        </Section>
-      )}
-
-      {/* ── Cycle chord diagram ── */}
-      <Section
-        title="Cycle diagram"
-        caption="Arcs join stickers in the same cycle."
-        why={<p>
-          All {stickers} sticker positions sit on a circle, grouped by face. Each cycle of the
-          current permutation is drawn in its own color; a solved cube shows no arcs.
-        </p>}
-      >
-        <CycleChordDiagram cycles={cycles} model={model} />
-      </Section>
-
-      {/* ── Piece orbit diagram (3×3) ── */}
       {isCube && N === 3 && (
-        <Section
-          title="Pieces"
-          caption="Corners outside, edges inside; orange rings are out of place."
-          why={<p>
-            Corners can only go to corner slots and edges to edge slots: they are separate
-            orbits of the group. Each node shows the colors of the piece currently in that slot.
-          </p>}
-        >
+        <Section title="Pieces" caption="Corners outside, edges inside. Orange rings are out of place.">
           <PieceOrbitDiagram state={state} N={N} />
         </Section>
       )}
 
-      {/* ── Key concepts ── */}
-      <Section
-        title="Toolkit"
-        why={<p>
-          Commutators and conjugates are how cubers build algorithms: a commutator confines
-          the change to the pieces A and B share, and a conjugate moves that change to where
-          it is needed. The order of an element divides the order of the group (Lagrange).
-        </p>}
-      >
-        {(open) => (
-          <div className="concept-grid">
-            <ConceptCard open={open} title="Commutator" math="[A, B] = A B A⁻¹ B⁻¹"
-              desc="Do A, do B, undo A, undo B. Only the pieces both moves touch change." />
-            <ConceptCard open={open} title="Conjugate" math="A B A⁻¹"
-              desc="Set up with A, do B, undo the setup: B's effect, moved somewhere else." />
-            <ConceptCard open={open} title="Order" math={`|${sample}| = ${sampleOrder}`}
-              desc={`Repeat ${sample} ${sampleOrder} times and every sticker is home again.`} />
-            <ConceptCard open={open} title="Group size" math={size.math} desc={size.fact} />
-          </div>
-        )}
+      <Section title="Toolkit" caption="The ideas cubers build algorithms from.">
+        <div className="concept-grid">
+          <ConceptCard title="Commutator" math="A B A⁻¹ B⁻¹"
+            desc="Do A, do B, undo A, undo B. Only the pieces both moves touch change." />
+          <ConceptCard title="Conjugate" math="A B A⁻¹"
+            desc="Set up with A, do B, undo the setup: B's effect, moved somewhere else." />
+          <ConceptCard title="Order" math={`${sample} × ${sampleOrder}`}
+            desc={`Repeat ${sample} ${sampleOrder} times and every sticker is home again.`} />
+          <ConceptCard title="How many positions" math={size.math} desc={size.fact} />
+        </div>
       </Section>
     </div>
   );
@@ -337,9 +246,8 @@ function CycleChordDiagram({ cycles, model }) {
             opacity={inCycle[i] ? 1 : 0.45} />
         );
       })}
-      <text x={cx} y={cy - 4} textAnchor="middle" fontSize="10" fill="#7a7060">σ</text>
-      <text x={cx} y={cy + 9} textAnchor="middle" fontSize="8" fill="#7a7060">
-        {cycles.length === 0 ? 'identity' : `${cycles.length} cycles`}
+      <text x={cx} y={cy + 4} textAnchor="middle" fontSize="10" fill="#7a7060">
+        {cycles.length === 0 ? 'all home' : `${cycles.length} loop${cycles.length === 1 ? '' : 's'}`}
       </text>
     </svg>
   );
@@ -481,42 +389,12 @@ function PieceOrbitDiagram({ state, N }) {
   );
 }
 
-// ── Permutation Trace "How it works" toggle ─────────────────────────────────
-
-
-function PermTraceExplainer({ stickers }) {
-  return (
-    <>
-      <p>
-        Sticker slots are numbered face by face, and labels like
-        <span className="math-mono"> U12</span> name a face and a slot on it. A turn is a
-        permutation σ of the {stickers} slots: it moves stickers in rings, written
-        <span className="math-mono"> (a b c)</span> for a→b→c→a.
-      </p>
-      <p>
-        Each row composes one more turn into the running product σ₁·σ₂·…·σₖ (first σ₁, then σ₂).
-        A k-cycle is k−1 swaps, so parity is even or odd by the total count.
-      </p>
-    </>
-  );
-}
-
-
-function StatChip({ label, tooltip, value, color }) {
-  return (
-    <div className="stat-chip" title={tooltip}>
-      <span className="chip-label">{label}</span>
-      <span className="chip-value" style={color ? { color } : {}}>{value}</span>
-    </div>
-  );
-}
-
-function ConceptCard({ title, math, desc, open }) {
+function ConceptCard({ title, math, desc }) {
   return (
     <div className="concept-card">
       <div className="concept-title">{title}</div>
       <div className="concept-math">{math}</div>
-      {open && <div className="concept-desc">{desc}</div>}
+      <div className="concept-desc">{desc}</div>
     </div>
   );
 }

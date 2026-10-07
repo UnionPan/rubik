@@ -1,6 +1,41 @@
 import { useState, useEffect, useCallback, useRef, useMemo } from 'react';
 import { tokenize } from '../lib/algorithms';
 import Section from './ui/Section';
+import StageIcon from './StageIcon';
+import CaseDiagram from './CaseDiagram';
+
+// What each solving stage means, in plain words (the detector's stage ids)
+const STAGE_INFO = {
+  'first-layer': 'Solve the four bottom corners.',
+  centers: 'Make the middle of every face one solid color.',
+  edges: 'Pair up the edge pieces so each edge looks like a single 3×3 edge.',
+  cross: 'Make a cross on the bottom face, each arm matching the side it touches.',
+  f2l: 'F2L means First Two Layers: fill in the bottom two layers, one corner with its edge at a time.',
+  oll: 'OLL means Orient the Last Layer: turn the top pieces so the top face is all one color.',
+  'oll-parity': 'A 4×4-only case: one top edge is flipped, which a 3×3 can never do. A special algorithm fixes it.',
+  pll: 'PLL means Permute the Last Layer: move the top pieces to their right spots without twisting them.',
+  'pll-parity': 'A 4×4-only case: two top edges need to swap, which a 3×3 can never do. A special algorithm fixes it.',
+  'first-face': 'Make one face a single color.',
+  'second-face': 'Make the opposite face a single color too.',
+  leaves: 'Cycle the remaining leaves into place.',
+  'first-corners': 'Solve the three corners around one fixed face.',
+  'other-corners': 'Solve the other three corners.',
+};
+
+// What each library category is for, and which stage picture goes with it
+const CATEGORY_INFO = {
+  Beginner: { text: 'The first sequences everyone learns. Each moves a few pieces and leaves the rest alone.' },
+  F2L: { stage: 'f2l', text: 'First Two Layers: put a bottom corner and the edge above it in together.' },
+  OLL: { stage: 'oll', text: 'Orient the Last Layer: make the top face one color. Pieces may still sit in the wrong spots.' },
+  PLL: { stage: 'pll', text: 'Permute the Last Layer: with the top face done, move the top pieces to their spots.' },
+  'Big Cube': { text: '4×4 and 5×5 only: pairing edges and fixing the parity cases a 3×3 never has.' },
+  Patterns: { text: 'Pretty patterns like checkerboards, made by moving many pieces in a regular way.' },
+  'Group Theory': { text: 'Sequences that show an idea from the Math tab, like commutators and how often a move repeats.' },
+  Basics: { text: 'Single turns and the smallest building blocks.' },
+  Leaves: { text: 'Move the leaf-shaped centers without disturbing the corners.' },
+  Corners: { text: 'Move or twist corners and leave everything else alone.' },
+  Centers: { text: 'Cycle the moving centers and leave the corners alone.' },
+};
 
 /** The inverse of a quarter turn */
 function invertTurn(t) {
@@ -51,6 +86,9 @@ export default function AlgorithmPanel({
   const entryStateRef = useRef(baseState);
 
   const algList = library.list.filter(a => a.category === selectedCategory);
+  // Last-layer cases get the standard top-view picture
+  const diagramMode = model.kind === 'cube' && (selectedCategory === 'OLL' || selectedCategory === 'PLL')
+    ? selectedCategory.toLowerCase() : null;
   const tokens = useMemo(
     () => (selectedAlg ? tokenize(selectedAlg.notation) : []),
     [selectedAlg],
@@ -202,6 +240,7 @@ export default function AlgorithmPanel({
           onJump={detectedPattern.matchedAlg ? () => jumpToAlg(detectedPattern.matchedAlg.id) : null}
           onApplySetup={onApplySetup}
           selectedAlgId={selectedAlg?.id}
+          iconSize={model.kind === 'cube' ? Math.min(model.N, 3) : 0}
         >
           {detectorExtra}
         </PatternDetector>
@@ -229,6 +268,15 @@ export default function AlgorithmPanel({
           })}
         </div>
 
+        {CATEGORY_INFO[selectedCategory] && (
+          <div className="cat-info">
+            {model.kind === 'cube' && CATEGORY_INFO[selectedCategory].stage && (
+              <StageIcon stage={CATEGORY_INFO[selectedCategory].stage} size={38} />
+            )}
+            <p>{CATEGORY_INFO[selectedCategory].text}</p>
+          </div>
+        )}
+
         <div className="alg-list">
           {algList.length === 0 && (
             <div className="empty-msg">No algorithms in this category for the {library.label}.</div>
@@ -242,9 +290,12 @@ export default function AlgorithmPanel({
                   aria-expanded={selected}
                   onClick={() => (selected ? setSelectedAlg(null) : selectAlgorithm(alg))}
                 >
-                  <span className="alg-name">{alg.name}</span>
-                  <span className="alg-notation">{alg.notation}</span>
-                  {alg.algebraNote && <span className="alg-algebra-badge">{alg.algebraNote}</span>}
+                  {diagramMode && <CaseDiagram notation={alg.notation} mode={diagramMode} />}
+                  <span className="alg-head-text">
+                    <span className="alg-name">{alg.name}</span>
+                    <span className="alg-notation">{alg.notation}</span>
+                    {alg.description && <span className="alg-desc">{alg.description}</span>}
+                  </span>
                 </button>
                 {selected && (
                   <AlgorithmStepper
@@ -281,7 +332,7 @@ function AlgorithmStepper({
 }) {
   return (
     <div className="alg-detail">
-      {alg.description && <p className="alg-description">{alg.description}</p>}
+      {alg.algebraNote && <p className="alg-description">{alg.algebraNote}</p>}
 
       <div className="move-tokens">
         {tokens.map((tok, i) => (
@@ -355,7 +406,7 @@ const STAGE_META = {
   'other-corners': { color: '#fdba74', icon: '◆' },
 };
 
-function PatternDetector({ pattern, label, onJump, onApplySetup, selectedAlgId, children }) {
+function PatternDetector({ pattern, label, onJump, onApplySetup, selectedAlgId, iconSize, children }) {
   const meta = STAGE_META[pattern.stage] || STAGE_META.cross;
   const { progress, matchedAlg } = pattern;
   const isParity = pattern.stage.endsWith('parity');
@@ -378,13 +429,15 @@ function PatternDetector({ pattern, label, onJump, onApplySetup, selectedAlgId, 
       {pattern.steps.length > 0 && (
         <ol className="pd-steps" aria-label="Solve stages">
           {pattern.steps.map(st => (
-            <li key={st.id} className={`pd-step ${st.status}`}>
-              {st.status === 'done' ? '✓ ' : ''}{st.label}
+            <li key={st.id} className={`pd-step ${st.status}`} title={STAGE_INFO[st.id]}>
+              {iconSize > 0 && <StageIcon stage={st.id} n={iconSize} size={26} />}
+              <span>{st.status === 'done' ? '✓ ' : ''}{st.label}</span>
             </li>
           ))}
         </ol>
       )}
 
+      {STAGE_INFO[pattern.stage] && <p className="pd-what">{STAGE_INFO[pattern.stage]}</p>}
       <div className="pd-message">{pattern.message}</div>
 
       {progress && (
